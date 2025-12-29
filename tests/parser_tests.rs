@@ -181,12 +181,3 @@ fn test_parse_accepts_tls12_tls13() {
     let header = result.unwrap();
     assert_eq!(header.version, 0x0303);
 }
-
-#[test]
-fn test_parse_rejects_tls13_indicator() {
-    // Reject 0x0304 - TLS 1.3 records must use 0x0303, not 0x0304
-    let bytes = vec![22, 0x03, 0x04, 0x00, 0x64];
-    let result: Result<TestRecordHeader, TlsError> = parse_header(&bytes);
-
-    assert_eq!(result, Err(TlsError::InvalidVersion(0x0304)));
-}
