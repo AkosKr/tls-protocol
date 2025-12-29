@@ -4,7 +4,7 @@ use tls_protocol::{parse_header, TlsError};
 // Mock types for testing (mimicking the structure from branch 1)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TestContentType {
-    ChangeChiperSpec = 20,
+    ChangeCipherSpec = 20,
     Alert = 21,
     Handshake = 22,
     ApplicationData = 23,
@@ -15,7 +15,7 @@ impl TryFrom<u8> for TestContentType {
 
     fn try_from(value: u8) -> Result<Self, Self::Error> {
         match value {
-            20 => Ok(TestContentType::ChangeChiperSpec),
+            20 => Ok(TestContentType::ChangeCipherSpec),
             21 => Ok(TestContentType::Alert),
             22 => Ok(TestContentType::Handshake),
             23 => Ok(TestContentType::ApplicationData),
@@ -101,7 +101,7 @@ fn test_parse_invalid_version() {
     let bytes = vec![22, 0x03, 0x04, 0x00, 0x64];
     let result: Result<TestRecordHeader, TlsError> = parse_header(&bytes);
 
-    assert_eq!(result, Err(TlsError::InvalidVersion));
+    assert_eq!(result, Err(TlsError::InvalidVersion(0x0304)));
 }
 
 #[test]
@@ -110,7 +110,7 @@ fn test_parse_invalid_version_too_old() {
     let bytes = vec![22, 0x03, 0x01, 0x00, 0x64];
     let result: Result<TestRecordHeader, TlsError> = parse_header(&bytes);
 
-    assert_eq!(result, Err(TlsError::InvalidVersion));
+    assert_eq!(result, Err(TlsError::InvalidVersion(0x0301)));
 }
 
 #[test]
@@ -119,7 +119,7 @@ fn test_parse_invalid_content_type() {
     let bytes = vec![99, 0x03, 0x03, 0x00, 0x64];
     let result: Result<TestRecordHeader, TlsError> = parse_header(&bytes);
 
-    assert_eq!(result, Err(TlsError::InvalidContentType));
+    assert_eq!(result, Err(TlsError::InvalidContentType(99)));
 }
 
 #[test]
@@ -128,7 +128,7 @@ fn test_parse_invalid_length_too_large() {
     let bytes = vec![22, 0x03, 0x03, 0x40, 0x01];
     let result: Result<TestRecordHeader, TlsError> = parse_header(&bytes);
 
-    assert_eq!(result, Err(TlsError::InvalidLength));
+    assert_eq!(result, Err(TlsError::InvalidLength(16385)));
 }
 
 #[test]
@@ -159,7 +159,7 @@ fn test_parse_rejects_tls10() {
     let bytes = vec![22, 0x03, 0x01, 0x00, 0x64];
     let result: Result<TestRecordHeader, TlsError> = parse_header(&bytes);
 
-    assert_eq!(result, Err(TlsError::InvalidVersion));
+    assert_eq!(result, Err(TlsError::InvalidVersion(0x0301)));
 }
 
 #[test]
@@ -168,7 +168,7 @@ fn test_parse_rejects_tls11() {
     let bytes = vec![22, 0x03, 0x02, 0x00, 0x64];
     let result: Result<TestRecordHeader, TlsError> = parse_header(&bytes);
 
-    assert_eq!(result, Err(TlsError::InvalidVersion));
+    assert_eq!(result, Err(TlsError::InvalidVersion(0x0302)));
 }
 
 #[test]
@@ -188,5 +188,5 @@ fn test_parse_rejects_tls13_indicator() {
     let bytes = vec![22, 0x03, 0x04, 0x00, 0x64];
     let result: Result<TestRecordHeader, TlsError> = parse_header(&bytes);
 
-    assert_eq!(result, Err(TlsError::InvalidVersion));
+    assert_eq!(result, Err(TlsError::InvalidVersion(0x0304)));
 }
