@@ -154,12 +154,12 @@ fn test_parse_zero_length() {
 }
 
 #[test]
-fn test_parse_rejects_tls10() {
-    // Reject TLS 1.0 (0x0301) - deprecated and insecure
-    let bytes = vec![22, 0x03, 0x01, 0x00, 0x64];
+fn test_parse_rejects_unknown_version() {
+    // Reject unknown/unsupported TLS version 0x0305
+    let bytes = vec![22, 0x03, 0x05, 0x00, 0x64];
     let result: Result<TestRecordHeader, TlsError> = parse_header(&bytes);
 
-    assert_eq!(result, Err(TlsError::InvalidVersion(0x0301)));
+    assert_eq!(result, Err(TlsError::InvalidVersion(0x0305)));
 }
 
 #[test]
