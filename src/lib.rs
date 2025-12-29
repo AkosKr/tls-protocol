@@ -1,5 +1,13 @@
 use std::convert::TryFrom;
 
+// Re-export modules for convenient access
+pub mod error;
+pub mod parser;
+
+// Re-export commonly used types
+pub use error::TlsError;
+pub use parser::parse_header;
+
 /// Maximum allowed length for a TLS record payload in bytes.
 /// 
 /// According to RFC 8446, this is 2^14 + 256 = 16640 bytes.
