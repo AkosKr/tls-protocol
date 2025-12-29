@@ -4,7 +4,11 @@ use tls_protocol::{parse_header, TlsError};
 // Mock types for testing (mimicking the structure from branch 1)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TestContentType {
+<<<<<<< HEAD
     ChangeCipherSpec = 20,
+=======
+    ChangeChiperSpec = 20,
+>>>>>>> b1e6f03 (Feature: implement TLS record header validation and parsing (issue #2))
     Alert = 21,
     Handshake = 22,
     ApplicationData = 23,
@@ -15,7 +19,11 @@ impl TryFrom<u8> for TestContentType {
 
     fn try_from(value: u8) -> Result<Self, Self::Error> {
         match value {
+<<<<<<< HEAD
             20 => Ok(TestContentType::ChangeCipherSpec),
+=======
+            20 => Ok(TestContentType::ChangeChiperSpec),
+>>>>>>> b1e6f03 (Feature: implement TLS record header validation and parsing (issue #2))
             21 => Ok(TestContentType::Alert),
             22 => Ok(TestContentType::Handshake),
             23 => Ok(TestContentType::ApplicationData),
@@ -101,7 +109,11 @@ fn test_parse_invalid_version() {
     let bytes = vec![22, 0x03, 0x04, 0x00, 0x64];
     let result: Result<TestRecordHeader, TlsError> = parse_header(&bytes);
 
+<<<<<<< HEAD
     assert_eq!(result, Err(TlsError::InvalidVersion(0x0304)));
+=======
+    assert_eq!(result, Err(TlsError::InvalidVersion));
+>>>>>>> b1e6f03 (Feature: implement TLS record header validation and parsing (issue #2))
 }
 
 #[test]
@@ -110,7 +122,11 @@ fn test_parse_invalid_version_too_old() {
     let bytes = vec![22, 0x03, 0x01, 0x00, 0x64];
     let result: Result<TestRecordHeader, TlsError> = parse_header(&bytes);
 
+<<<<<<< HEAD
     assert_eq!(result, Err(TlsError::InvalidVersion(0x0301)));
+=======
+    assert_eq!(result, Err(TlsError::InvalidVersion));
+>>>>>>> b1e6f03 (Feature: implement TLS record header validation and parsing (issue #2))
 }
 
 #[test]
@@ -119,7 +135,11 @@ fn test_parse_invalid_content_type() {
     let bytes = vec![99, 0x03, 0x03, 0x00, 0x64];
     let result: Result<TestRecordHeader, TlsError> = parse_header(&bytes);
 
+<<<<<<< HEAD
     assert_eq!(result, Err(TlsError::InvalidContentType(99)));
+=======
+    assert_eq!(result, Err(TlsError::InvalidContentType));
+>>>>>>> b1e6f03 (Feature: implement TLS record header validation and parsing (issue #2))
 }
 
 #[test]
@@ -128,7 +148,11 @@ fn test_parse_invalid_length_too_large() {
     let bytes = vec![22, 0x03, 0x03, 0x40, 0x01];
     let result: Result<TestRecordHeader, TlsError> = parse_header(&bytes);
 
+<<<<<<< HEAD
     assert_eq!(result, Err(TlsError::InvalidLength(16385)));
+=======
+    assert_eq!(result, Err(TlsError::InvalidLength));
+>>>>>>> b1e6f03 (Feature: implement TLS record header validation and parsing (issue #2))
 }
 
 #[test]
@@ -154,12 +178,21 @@ fn test_parse_zero_length() {
 }
 
 #[test]
+<<<<<<< HEAD
 fn test_parse_rejects_unknown_version() {
     // Reject unknown/unsupported TLS version 0x0305
     let bytes = vec![22, 0x03, 0x05, 0x00, 0x64];
     let result: Result<TestRecordHeader, TlsError> = parse_header(&bytes);
 
     assert_eq!(result, Err(TlsError::InvalidVersion(0x0305)));
+=======
+fn test_parse_rejects_tls10() {
+    // Reject TLS 1.0 (0x0301) - deprecated and insecure
+    let bytes = vec![22, 0x03, 0x01, 0x00, 0x64];
+    let result: Result<TestRecordHeader, TlsError> = parse_header(&bytes);
+
+    assert_eq!(result, Err(TlsError::InvalidVersion));
+>>>>>>> b1e6f03 (Feature: implement TLS record header validation and parsing (issue #2))
 }
 
 #[test]
@@ -168,7 +201,11 @@ fn test_parse_rejects_tls11() {
     let bytes = vec![22, 0x03, 0x02, 0x00, 0x64];
     let result: Result<TestRecordHeader, TlsError> = parse_header(&bytes);
 
+<<<<<<< HEAD
     assert_eq!(result, Err(TlsError::InvalidVersion(0x0302)));
+=======
+    assert_eq!(result, Err(TlsError::InvalidVersion));
+>>>>>>> b1e6f03 (Feature: implement TLS record header validation and parsing (issue #2))
 }
 
 #[test]
@@ -181,3 +218,15 @@ fn test_parse_accepts_tls12_tls13() {
     let header = result.unwrap();
     assert_eq!(header.version, 0x0303);
 }
+<<<<<<< HEAD
+=======
+
+#[test]
+fn test_parse_rejects_tls13_indicator() {
+    // Reject 0x0304 - TLS 1.3 records must use 0x0303, not 0x0304
+    let bytes = vec![22, 0x03, 0x04, 0x00, 0x64];
+    let result: Result<TestRecordHeader, TlsError> = parse_header(&bytes);
+
+    assert_eq!(result, Err(TlsError::InvalidVersion));
+}
+>>>>>>> b1e6f03 (Feature: implement TLS record header validation and parsing (issue #2))
