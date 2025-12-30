@@ -64,7 +64,7 @@ fn test_decode_valid_handshake_header() {
 #[test]
 fn test_decode_short_read_empty_buffer() {
     // Empty buffer - should return IncompleteData
-    // This tests the key feature of decode_header: handling short reads
+    // This tests handling of incomplete data (short reads) on an empty buffer
     let buffer: Vec<u8> = vec![];
     
     let result: Result<TestRecordHeader, TlsError> = decode_header(&buffer);

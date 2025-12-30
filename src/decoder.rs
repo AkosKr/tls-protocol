@@ -4,9 +4,9 @@ use std::convert::TryFrom;
 
 /// Decode a TLS record header from a byte stream
 ///
-/// This function is designed to handle stream reading scenarios where the buffer
-/// might not contain a complete header. It safely checks for sufficient bytes
-/// before attempting to parse the header.
+/// This is a convenience wrapper around `parse_header` that provides a more
+/// semantically appropriate name for stream reading use cases. Both functions
+/// perform identical validation including buffer length checks.
 ///
 /// # Arguments
 /// * `src` - A slice of bytes from a stream/buffer
@@ -26,9 +26,9 @@ use std::convert::TryFrom;
 /// }
 /// ```
 ///
-/// # Short Reads
-/// This function explicitly handles "short reads" by returning `IncompleteData`
-/// when the buffer contains fewer than 5 bytes (the minimum TLS record header size).
+/// # Note
+/// This function delegates directly to `parse_header` for all validation logic,
+/// including buffer length checks and protocol validation.
 pub fn decode_header<ContentType, RecordHeader>(
     src: &[u8],
 ) -> Result<RecordHeader, TlsError>
@@ -36,15 +36,8 @@ where
     ContentType: TryFrom<u8>,
     RecordHeader: From<(ContentType, u16, u16)>,
 {
-    // Check if we have enough bytes for a complete header (5 bytes minimum)
-    // This is the key difference from parse_header - we handle short reads
-    if src.len() < 5 {
-        return Err(TlsError::IncompleteData);
-    }
-
-    // Delegate to parse_header for actual parsing and validation
-    // This maintains separation of concerns:
-    // - decode_header: handles buffer length checking (stream reading concern)
-    // - parse_header: handles validation logic (protocol correctness concern)
+    // Delegate to parse_header for all parsing and validation logic.
+    // parse_header handles buffer length checks, version validation,
+    // content type validation, and length validation.
     parse_header::<ContentType, RecordHeader>(src)
 }
