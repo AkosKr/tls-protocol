@@ -1,5 +1,7 @@
 use std::convert::TryFrom;
 
+pub mod tls_stream;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ContentType {
     Invalid = 0,
