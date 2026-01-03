@@ -6,6 +6,7 @@ pub mod decoder;
 pub mod error;
 pub mod extensions;
 pub mod parser;
+pub mod server_hello;
 pub mod tls_stream;
 
 // Re-export commonly used types
@@ -14,6 +15,7 @@ pub use extensions::{Extension, KeyShareEntry};
 pub use decoder::decode_header;
 pub use error::TlsError;
 pub use parser::parse_header;
+pub use server_hello::ServerHello;
 
 /// Maximum allowed length for a TLS record payload in bytes.
 /// 

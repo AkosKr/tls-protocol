@@ -26,6 +26,16 @@ pub enum TlsError {
     /// Duplicate extension detected
     /// Carries the extension type identifier.
     DuplicateExtension(u16),
+    /// Invalid handshake type
+    /// Carries the received handshake type byte.
+    InvalidHandshakeType(u8),
+    /// Invalid or unsupported cipher suite
+    /// Carries the cipher suite identifier.
+    InvalidCipherSuite(u16),
+    /// Invalid random field
+    InvalidRandom,
+    /// Downgrade protection violation detected
+    DowngradeDetected,
 }
 
 impl fmt::Display for TlsError {
@@ -52,6 +62,18 @@ impl fmt::Display for TlsError {
             }
             TlsError::DuplicateExtension(ext_type) => {
                 write!(f, "Duplicate extension detected: 0x{ext_type:04x}")
+            }
+            TlsError::InvalidHandshakeType(hs_type) => {
+                write!(f, "Invalid handshake type: 0x{hs_type:02x}")
+            }
+            TlsError::InvalidCipherSuite(suite) => {
+                write!(f, "Invalid or unsupported cipher suite: 0x{suite:04x}")
+            }
+            TlsError::InvalidRandom => {
+                write!(f, "Invalid random field")
+            }
+            TlsError::DowngradeDetected => {
+                write!(f, "Downgrade protection violation detected")
             }
         }
     }

@@ -148,6 +148,71 @@ This project implements core components of the TLS 1.3 protocol as specified in 
 
 **Files**: [src/extensions.rs](src/extensions.rs), [src/error.rs](src/error.rs)
 
+### Issue #11: ServerHello Message Parser ✅
+**Goal**: Build a strict parser for the ServerHello message as defined in RFC 8446 (section 4.1.3).
+
+**Implementation**:
+- `ServerHello` struct with fields:
+  - `random`: [u8; 32] - 32 bytes of cryptographic random data
+  - `legacy_session_id_echo`: Vec<u8> - Echo of the legacy session ID from ClientHello
+  - `cipher_suite`: u16 - The single selected cipher suite
+  - `extensions`: Vec<Extension> - TLS extensions (reuses existing framework)
+
+- `DowngradeProtection` enum for downgrade detection:
+  - `Tls12Downgrade` - TLS 1.2 downgrade detected
+  - `Tls11Downgrade` - TLS 1.1 or earlier downgrade detected
+
+- Downgrade protection constants (RFC 8446, Appendix D.4):
+  - `TLS_1_2_DOWNGRADE_SENTINEL` - Special value in random field for TLS 1.2 downgrade
+  - `TLS_1_1_DOWNGRADE_SENTINEL` - Special value in random field for TLS 1.1 downgrade
+
+- Parser functionality:
+  - `ServerHello::from_bytes(data: &[u8]) -> Result<ServerHello, TlsError>` - Parse from wire format
+  - Validates handshake type (0x02 for ServerHello)
+  - Validates legacy_version (expects 0x0303 for TLS 1.2 compatibility)
+  - Extracts and validates random field (32 bytes)
+  - Parses legacy_session_id_echo (max 32 bytes)
+  - Validates selected cipher suite (only TLS 1.3 suites)
+  - Validates compression method (must be 0x00)
+  - Integrates with extension framework for extensibility
+
+- Validation features:
+  - `ServerHello::validate()` - Comprehensive validation
+  - Checks for mandatory extensions (supported_versions)
+  - Verifies supported_versions contains TLS 1.3
+  - Detects duplicate extensions
+  - Validates cipher suite is TLS 1.3 compatible
+
+- Downgrade protection:
+  - `ServerHello::check_downgrade_protection() -> Option<DowngradeProtection>` - Detects downgrade attempts
+  - Checks last 8 bytes of random field for sentinel values
+  - Implements RFC 8446 Appendix D.4 security measures
+
+- Serialization:
+  - `ServerHello::to_bytes()` - Serialize to wire format
+  - Full RFC 8446 compliant format
+
+- Error handling:
+  - `InvalidHandshakeType` - Non-ServerHello message
+  - `InvalidVersion` - Incorrect legacy_version
+  - `InvalidCipherSuite` - Unsupported cipher suite
+  - `InvalidRandom` - Malformed random field
+  - `DowngradeDetected` - Downgrade protection violation
+  - Clear error types for all validation and parsing failures
+
+**Testing**:
+- Valid ServerHello parsing and serialization
+- Malformed message handling (incomplete data, invalid fields)
+- Downgrade protection detection (TLS 1.2 and TLS 1.1)
+- Missing mandatory extensions
+- Invalid cipher suites
+- Duplicate extension detection
+- Session ID echo validation
+- Roundtrip serialization tests
+- Real-world-like ServerHello scenarios
+
+**Files**: [src/server_hello.rs](src/server_hello.rs), [tests/server_hello_tests.rs](tests/server_hello_tests.rs), [src/error.rs](src/error.rs)
+
 ## Project Structure
 
 ```
@@ -159,12 +224,14 @@ tls-protocol/
 │   ├── decoder.rs          # Header decoding
 │   ├── tls_stream.rs       # TCP stream wrapper
 │   ├── extensions.rs       # TLS extensions framework
-│   └── client_hello.rs     # ClientHello message implementation
+│   ├── client_hello.rs     # ClientHello message implementation
+│   └── server_hello.rs     # ServerHello message parser
 ├── tests/
 │   ├── parser_tests.rs     # Parser validation tests
 │   ├── decoder_tests.rs    # Decoder tests
 │   ├── tls_stream_tests.rs # Stream tests
-│   └── client_hello_tests.rs # ClientHello tests
+│   ├── client_hello_tests.rs # ClientHello tests
+│   └── server_hello_tests.rs # ServerHello parser tests
 ├── examples/
 │   ├── client.rs           # Example TLS client
 │   └── server.rs           # Example TLS server
@@ -230,6 +297,59 @@ let header = RecordHeader::new(ContentType::Handshake, 0x0303, 512);
 // Serialize to bytes
 let bytes = header.to_bytes();
 assert_eq!(bytes, [22, 3, 3, 2, 0]);
+```
+
+### Parsing ServerHello Messages
+
+```rust
+use tls_protocol::ServerHello;
+use tls_protocol::server_hello::DowngradeProtection;
+
+// Parse a ServerHello from received bytes
+let server_hello_bytes = received_data; // From network
+let server_hello = ServerHello::from_bytes(&server_hello_bytes)
+    .expect("Failed to parse ServerHello");
+
+// Check the selected cipher suite
+println!("Selected cipher suite: 0x{:04x}", server_hello.cipher_suite);
+
+// Check for downgrade protection
+match server_hello.check_downgrade_protection() {
+    Some(DowngradeProtection::Tls12Downgrade) => {
+        println!("Warning: TLS 1.2 downgrade detected!");
+    }
+    Some(DowngradeProtection::Tls11Downgrade) => {
+        println!("Warning: TLS 1.1 or earlier downgrade detected!");
+    }
+    None => {
+        println!("No downgrade detected - secure TLS 1.3 connection");
+    }
+}
+
+// Access extensions
+for extension in &server_hello.extensions {
+    println!("Extension: {:?}", extension);
+}
+
+// Create a ServerHello (for testing/server implementation)
+use tls_protocol::extensions::{Extension, KeyShareEntry, TLS_VERSION_1_3, NAMED_GROUP_X25519};
+use tls_protocol::server_hello::TLS_AES_128_GCM_SHA256;
+
+let random = [0xaa; 32];
+let session_id_echo = vec![];
+let extensions = vec![
+    Extension::SupportedVersions(vec![TLS_VERSION_1_3]),
+    Extension::KeyShare(vec![KeyShareEntry::new(NAMED_GROUP_X25519, vec![0xbb; 32])]),
+];
+
+let server_hello = ServerHello::new(
+    random,
+    session_id_echo,
+    TLS_AES_128_GCM_SHA256,
+    extensions,
+);
+
+let bytes = server_hello.to_bytes();
 ```
 
 ### Parsing TLS Records
