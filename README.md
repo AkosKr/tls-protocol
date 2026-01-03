@@ -78,29 +78,49 @@ This project implements core components of the TLS 1.3 protocol as specified in 
   - `random`: [u8; 32] - 32 bytes of cryptographic random data
   - `legacy_session_id`: Vec<u8> - Legacy session ID for compatibility
   - `cipher_suites`: Vec<u16> - Supported cipher suites
-  - `extensions`: Vec<Extension> - TLS extensions
+  - `extensions`: Vec<Extension> - TLS extensions from the extensions framework
   
-- `Extension` enum supporting:
-  - `SupportedVersions` - Mandatory for TLS 1.3 (extension type 43)
-  - `KeyShare` - Mandatory for TLS 1.3 (extension type 51)
-  - `Unknown` - For extensibility
+- **TLS Extensions Framework** (`extensions.rs`):
+  - `Extension` enum supporting:
+    - `ServerName` - Server Name Indication (SNI, extension type 0)
+    - `SignatureAlgorithms` - Supported signature algorithms (extension type 13)
+    - `SupportedVersions` - Mandatory for TLS 1.3 (extension type 43)
+    - `KeyShare` - Mandatory for TLS 1.3 (extension type 51)
+    - `Unknown` - For extensibility
   
-- `KeyShareEntry` struct for key exchange with:
-  - `group`: u16 - Named group (e.g., x25519, secp256r1)
-  - `key_exchange`: Vec<u8> - Public key data
+  - `KeyShareEntry` struct for key exchange with:
+    - `group`: u16 - Named group (e.g., x25519, secp256r1)
+    - `key_exchange`: Vec<u8> - Public key data
+  
+  - Extension validation helpers:
+    - `validate_tls13_extensions()` - Ensures mandatory extensions are present
+    - `check_duplicate_extensions()` - Detects duplicate extensions
+    - `Extension::parse_extensions()` - Parse multiple extensions from bytes
+    - `Extension::serialize_extensions()` - Serialize multiple extensions
+  
+  - Extension serialization and deserialization:
+    - `Extension::to_bytes()` - Serialize single extension
+    - `Extension::from_bytes()` - Deserialize single extension from bytes
   
 - TLS 1.3 cipher suite constants:
   - `TLS_AES_128_GCM_SHA256` (0x1301)
   - `TLS_AES_256_GCM_SHA384` (0x1302)
   - `TLS_CHACHA20_POLY1305_SHA256` (0x1303)
   
-- Named group constants:
+- Named group constants (in `extensions.rs`):
   - `NAMED_GROUP_X25519` (0x001d)
   - `NAMED_GROUP_SECP256R1` (0x0017)
+  - `NAMED_GROUP_SECP384R1` (0x0018)
+  - `NAMED_GROUP_SECP521R1` (0x0019)
+  
+- Signature scheme constants (in `extensions.rs`):
+  - RSA PKCS1: SHA256, SHA384, SHA512
+  - ECDSA: secp256r1, secp384r1, secp521r1
+  - RSA-PSS: SHA256, SHA384, SHA512
+  - EdDSA: Ed25519, Ed448
   
 - Serialization methods:
   - `ClientHello::to_bytes()` - Full handshake message serialization
-  - `Extension::to_bytes()` - Extension serialization
   - `ClientHello::default_tls13()` - Helper for creating TLS 1.3 ClientHello with mandatory extensions
   
 - Wire format (RFC 8446 compliant):
@@ -113,7 +133,20 @@ This project implements core components of the TLS 1.3 protocol as specified in 
   - Legacy compression methods (2 bytes)
   - Extensions (variable)
 
-**Files**: [src/client_hello.rs](src/client_hello.rs), [tests/client_hello_tests.rs](tests/client_hello_tests.rs)
+**Files**: [src/client_hello.rs](src/client_hello.rs), [src/extensions.rs](src/extensions.rs), [tests/client_hello_tests.rs](tests/client_hello_tests.rs)
+
+### Issue #9: TLS Framework Extension ✅
+**Goal**: Create a comprehensive TLS extensions framework supporting serialization, deserialization, and validation.
+
+**Implementation**:
+- Complete `Extension` enum with full TLS 1.3 extension support
+- Bidirectional serialization (to/from bytes)
+- Extension validation for TLS 1.3 compliance
+- Server Name Indication (SNI) support
+- Signature algorithms extension
+- Comprehensive error handling for malformed extensions
+
+**Files**: [src/extensions.rs](src/extensions.rs), [src/error.rs](src/error.rs)
 
 ## Project Structure
 
@@ -121,10 +154,11 @@ This project implements core components of the TLS 1.3 protocol as specified in 
 tls-protocol/
 ├── src/
 │   ├── lib.rs              # Core types and exports
-│   ├── error.rs            # Error types
+│   ├── error.rs            # Error types with extension error variants
 │   ├── parser.rs           # Header parsing logic
 │   ├── decoder.rs          # Header decoding
 │   ├── tls_stream.rs       # TCP stream wrapper
+│   ├── extensions.rs       # TLS extensions framework
 │   └── client_hello.rs     # ClientHello message implementation
 ├── tests/
 │   ├── parser_tests.rs     # Parser validation tests
@@ -143,8 +177,8 @@ tls-protocol/
 ### Basic Example: Creating a ClientHello
 
 ```rust
-use tls_protocol::client_hello::{ClientHello, Extension, KeyShareEntry};
-use tls_protocol::client_hello::{TLS_VERSION_1_3, NAMED_GROUP_X25519};
+use tls_protocol::ClientHello;
+use tls_protocol::extensions::{Extension, KeyShareEntry, TLS_VERSION_1_3, NAMED_GROUP_X25519};
 
 // Generate random bytes (32 bytes required)
 let random = [0u8; 32]; // In production, use cryptographically secure random
@@ -152,11 +186,37 @@ let random = [0u8; 32]; // In production, use cryptographically secure random
 // Generate or provide x25519 public key (32 bytes)
 let public_key = vec![0xaa; 32];
 
-// Create a default TLS 1.3 ClientHello
+// Create a default TLS 1.3 ClientHello with mandatory extensions
 let client_hello = ClientHello::default_tls13(random, public_key);
 
 // Serialize to bytes for sending over the wire
 let bytes = client_hello.to_bytes();
+```
+
+### Working with Extensions
+
+```rust
+use tls_protocol::extensions::{Extension, KeyShareEntry, NAMED_GROUP_X25519, TLS_VERSION_1_3};
+use tls_protocol::extensions::{validate_tls13_extensions, check_duplicate_extensions};
+
+// Create extensions
+let extensions = vec![
+    Extension::ServerName("example.com".to_string()),
+    Extension::SupportedVersions(vec![TLS_VERSION_1_3]),
+    Extension::KeyShare(vec![KeyShareEntry::new(NAMED_GROUP_X25519, vec![0xaa; 32])]),
+];
+
+// Validate TLS 1.3 mandatory extensions
+validate_tls13_extensions(&extensions).expect("Missing mandatory extensions");
+
+// Check for duplicates
+check_duplicate_extensions(&extensions).expect("Duplicate extension found");
+
+// Serialize extensions
+let bytes = Extension::serialize_extensions(&extensions);
+
+// Parse extensions from bytes
+let parsed = Extension::parse_extensions(&bytes).expect("Failed to parse extensions");
 ```
 
 ### Working with TLS Records

@@ -1,4 +1,5 @@
 use tls_protocol::client_hello::*;
+use tls_protocol::extensions::*;
 
 #[test]
 fn test_create_client_hello_with_default_tls13() {
