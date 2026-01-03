@@ -51,7 +51,7 @@ fn test_invalid_handshake_type() {
     // Create a ClientHello (0x01) instead of ServerHello (0x02)
     let mut data = vec![
         0x01, // ClientHello instead of ServerHello
-        0x00, 0x00, 0x29, // Length (41 bytes)
+        0x00, 0x00, 0x28, // Length (40 bytes: 2+32+1+2+1+2)
         0x03, 0x03, // Legacy version
     ];
     data.extend_from_slice(&[0xaa; 32]); // Random (32 bytes)
@@ -262,29 +262,34 @@ fn test_roundtrip_serialization() {
 fn test_invalid_compression_method() {
     let random = [0xaa; 32];
     
-    let mut data = vec![
-        0x02, // ServerHello
-        0x00, 0x00, 0x29, // Length
+    // Build ServerHello body (without handshake header)
+    let mut body = vec![
         0x03, 0x03, // Legacy version
     ];
-    data.extend_from_slice(&random);
-    data.push(0x00); // Session ID length
-    data.extend_from_slice(&TLS_AES_128_GCM_SHA256.to_be_bytes());
-    data.push(0x01); // Invalid compression method (should be 0x00)
-    data.extend_from_slice(&[0x00, 0x08]); // Extensions length
+    body.extend_from_slice(&random);
+    body.push(0x00); // Session ID length
+    body.extend_from_slice(&TLS_AES_128_GCM_SHA256.to_be_bytes());
+    body.push(0x01); // Invalid compression method (should be 0x00)
     
     // Add supported_versions extension
-    let ext_bytes = Extension::serialize_extensions(&vec![
-        Extension::SupportedVersions(vec![TLS_VERSION_1_3]),
-    ]);
-    data.extend_from_slice(&ext_bytes);
+    let ext = Extension::SupportedVersions(vec![TLS_VERSION_1_3]);
+    let ext_bytes = ext.to_bytes();
+    let ext_len = (ext_bytes.len() as u16).to_be_bytes();
+    body.extend_from_slice(&ext_len); // Extensions length
+    body.extend_from_slice(&ext_bytes);
+    
+    // Now prepend handshake header
+    let body_len = (body.len() as u32).to_be_bytes();
+    let mut data = vec![0x02]; // ServerHello type
+    data.extend_from_slice(&body_len[1..4]); // 3-byte length
+    data.extend_from_slice(&body);
     
     let result = ServerHello::from_bytes(&data);
     
-    assert!(matches!(
-        result,
-        Err(TlsError::InvalidExtensionData(_))
-    ));
+    match result {
+        Err(TlsError::InvalidCompressionMethod(0x01)) => {}, // Expected
+        other => panic!("Expected InvalidCompressionMethod(0x01), got {:?}", other),
+    }
 }
 
 #[test]

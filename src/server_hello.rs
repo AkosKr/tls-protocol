@@ -151,9 +151,7 @@ impl ServerHello {
         offset += 1;
         
         if compression_method != 0x00 {
-            return Err(TlsError::InvalidExtensionData(
-                format!("Invalid compression method: 0x{:02x}", compression_method)
-            ));
+            return Err(TlsError::InvalidCompressionMethod(compression_method));
         }
         
         // Parse extensions length (2 bytes)
@@ -169,8 +167,22 @@ impl ServerHello {
             return Err(TlsError::IncompleteData);
         }
         
-        let extensions_data = &data[offset..offset + extensions_len];
-        let extensions = Extension::parse_extensions(extensions_data)?;
+        // Parse individual extensions (not using parse_extensions which expects its own length prefix)
+        let mut extensions = Vec::new();
+        let mut ext_offset = offset;
+        let ext_end = offset + extensions_len;
+        
+        while ext_offset < ext_end {
+            let (ext, consumed) = Extension::from_bytes(&data[ext_offset..])?;
+            extensions.push(ext);
+            ext_offset += consumed;
+        }
+        
+        if ext_offset != ext_end {
+            return Err(TlsError::InvalidExtensionData(
+                "Extensions length mismatch".to_string()
+            ));
+        }
         
         let server_hello = Self {
             random,
@@ -208,6 +220,10 @@ impl ServerHello {
         data.extend_from_slice(&self.random);
         
         // Legacy session ID echo length (1 byte) + session ID
+        assert!(
+            self.legacy_session_id_echo.len() <= 32,
+            "legacy_session_id_echo length must not exceed 32 bytes"
+        );
         data.push(self.legacy_session_id_echo.len() as u8);
         data.extend_from_slice(&self.legacy_session_id_echo);
         
@@ -217,10 +233,19 @@ impl ServerHello {
         // Legacy compression method (1 byte) - always 0x00
         data.push(0x00);
         
-        // Extensions
-        let extensions_bytes = Extension::serialize_extensions(&self.extensions);
-        data.extend_from_slice(&(extensions_bytes.len() as u16).to_be_bytes());
-        data.extend_from_slice(&extensions_bytes);
+        // Serialize extensions manually (following ClientHello pattern)
+        let mut extensions_data = Vec::new();
+        for ext in &self.extensions {
+            extensions_data.extend_from_slice(&ext.to_bytes());
+        }
+        
+        // Extensions length (2 bytes) + extensions
+        let extensions_len: u16 = extensions_data
+            .len()
+            .try_into()
+            .expect("extensions data length exceeds u16 maximum (65535 bytes)");
+        data.extend_from_slice(&extensions_len.to_be_bytes());
+        data.extend_from_slice(&extensions_data);
         
         // Prepend handshake header
         let mut result = Vec::new();
@@ -273,12 +298,18 @@ impl ServerHello {
             return Err(TlsError::MissingMandatoryExtension("supported_versions"));
         }
         
-        // Verify that supported_versions contains TLS 1.3
+        // Verify that supported_versions contains exactly one version and it's TLS 1.3
+        // Per RFC 8446 Section 4.2.1: ServerHello must contain exactly one version
         for ext in &self.extensions {
             if let Extension::SupportedVersions(versions) = ext {
-                if !versions.contains(&TLS_VERSION_1_3) {
+                if versions.len() != 1 {
                     return Err(TlsError::InvalidExtensionData(
-                        "supported_versions must contain TLS 1.3 (0x0304)".to_string()
+                        format!("supported_versions in ServerHello must contain exactly one version, found {}", versions.len())
+                    ));
+                }
+                if versions[0] != TLS_VERSION_1_3 {
+                    return Err(TlsError::InvalidExtensionData(
+                        format!("supported_versions must contain TLS 1.3 (0x0304), found 0x{:04x}", versions[0])
                     ));
                 }
             }

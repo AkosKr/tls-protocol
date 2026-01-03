@@ -32,9 +32,14 @@ pub enum TlsError {
     /// Invalid or unsupported cipher suite
     /// Carries the cipher suite identifier.
     InvalidCipherSuite(u16),
-    /// Invalid random field
+    /// Invalid compression method
+    /// Carries the received compression method byte.
+    InvalidCompressionMethod(u8),
+    // Note: The following error variants are reserved for future use
+    // and are not currently thrown by the implementation.
+    /// Invalid random field (reserved for future use)
     InvalidRandom,
-    /// Downgrade protection violation detected
+    /// Downgrade protection violation detected (reserved for future use)
     DowngradeDetected,
 }
 
@@ -68,6 +73,9 @@ impl fmt::Display for TlsError {
             }
             TlsError::InvalidCipherSuite(suite) => {
                 write!(f, "Invalid or unsupported cipher suite: 0x{suite:04x}")
+            }
+            TlsError::InvalidCompressionMethod(method) => {
+                write!(f, "Invalid compression method: 0x{method:02x}, expected 0x00")
             }
             TlsError::InvalidRandom => {
                 write!(f, "Invalid random field")
