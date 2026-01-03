@@ -3,6 +3,7 @@ use std::convert::TryFrom;
 // Re-export modules for convenient access
 pub mod decoder;
 pub mod error;
+pub mod extensions;
 pub mod parser;
 pub mod tls_stream;
 
