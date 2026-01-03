@@ -120,11 +120,11 @@ impl ClientHello {
         }
         
         // Extensions length (2 bytes) + extensions
-        let extensions_len = extensions_data.len();
-        if extensions_len > u16::MAX as usize {
-            panic!("Total extensions data exceeds maximum encodable length (65535 bytes)");
-        }
-        data.extend_from_slice(&(extensions_len as u16).to_be_bytes());
+        let extensions_len: u16 = extensions_data
+            .len()
+            .try_into()
+            .expect("Total extensions data exceeds maximum encodable length");
+        data.extend_from_slice(&extensions_len.to_be_bytes());
         data.extend_from_slice(&extensions_data);
         
         // Now wrap in handshake message
