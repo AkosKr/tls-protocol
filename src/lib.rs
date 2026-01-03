@@ -1,11 +1,25 @@
 use std::convert::TryFrom;
 
+// Re-export modules for convenient access
+pub mod decoder;
+pub mod error;
+pub mod parser;
 pub mod tls_stream;
+
+// Re-export commonly used types
+pub use decoder::decode_header;
+pub use error::TlsError;
+pub use parser::parse_header;
+
+/// Maximum allowed length for a TLS record payload in bytes.
+/// 
+/// According to RFC 8446, this is 2^14 + 256 = 16640 bytes.
+pub const MAX_RECORD_LENGTH: u16 = (1 << 14) + 256;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ContentType {
     Invalid = 0,
-    ChangeChiperSpec = 20,
+    ChangeCipherSpec = 20,
     Alert = 21,
     Handshake = 22,
     ApplicationData = 23,
@@ -22,7 +36,8 @@ impl TryFrom<u8> for ContentType {
 
     fn try_from(value: u8) -> Result<Self, Self::Error> {
         match value {
-            20 => Ok(ContentType::ChangeChiperSpec),
+            0 => Ok(ContentType::Invalid),
+            20 => Ok(ContentType::ChangeCipherSpec),
             21 => Ok(ContentType::Alert),
             22 => Ok(ContentType::Handshake),
             23 => Ok(ContentType::ApplicationData),
@@ -31,7 +46,7 @@ impl TryFrom<u8> for ContentType {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RecordHeader {
     pub content_type: ContentType,
     pub version: u16,
@@ -55,6 +70,16 @@ impl RecordHeader {
         bytes[3] = (self.length >> 8) as u8;
         bytes[4] = (self.length & 0xFF) as u8;
         bytes
+    }
+}
+
+impl From<(ContentType, u16, u16)> for RecordHeader {
+    fn from((content_type, version, length): (ContentType, u16, u16)) -> Self {
+        Self {
+            content_type,
+            version,
+            length,
+        }
     }
 }
 
