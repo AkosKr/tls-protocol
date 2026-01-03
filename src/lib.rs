@@ -1,12 +1,18 @@
+<<<<<<< HEAD
 use std::convert::TryFrom;
 
+=======
+>>>>>>> b1e6f03 (Feature: implement TLS record header validation and parsing (issue #2))
 // Re-export modules for convenient access
+pub mod decoder;
 pub mod error;
 pub mod parser;
 
 // Re-export commonly used types
+pub use decoder::decode_header;
 pub use error::TlsError;
 pub use parser::parse_header;
+<<<<<<< HEAD
 
 /// Maximum allowed length for a TLS record payload in bytes.
 /// 
@@ -227,3 +233,5 @@ mod tests {
     }
 
 }
+=======
+>>>>>>> b1e6f03 (Feature: implement TLS record header validation and parsing (issue #2))

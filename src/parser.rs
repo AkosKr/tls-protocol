@@ -17,7 +17,11 @@ use std::convert::TryFrom;
 /// - Ensures at least 5 bytes are available
 /// - Validates version is exactly 0x0303 (used by both TLS 1.2 and TLS 1.3)
 /// - Validates ContentType is within valid range
+<<<<<<< HEAD
 /// - Validates length is reasonable (0-16384 bytes, as per RFC 5246 and RFC 8446)
+=======
+/// - Validates length is reasonable (0-16384 bytes, as per RFC 8446)
+>>>>>>> b1e6f03 (Feature: implement TLS record header validation and parsing (issue #2))
 ///
 /// # Important Notes
 /// - **TLS 1.2**: Uses 0x0303 as the protocol version
@@ -35,9 +39,13 @@ where
     }
 
     // Parse content type (1 byte)
+<<<<<<< HEAD
     let content_type_byte = bytes[0];
     let content_type = ContentType::try_from(content_type_byte)
         .map_err(|_| TlsError::InvalidContentType(content_type_byte))?;
+=======
+    let content_type = ContentType::try_from(bytes[0]).map_err(|_| TlsError::InvalidContentType)?;
+>>>>>>> b1e6f03 (Feature: implement TLS record header validation and parsing (issue #2))
 
     // Parse version (2 bytes, big-endian)
     let version = u16::from_be_bytes([bytes[1], bytes[2]]);
@@ -45,15 +53,25 @@ where
     // Validate version - Only accept 0x0303 (TLS 1.2/1.3)
     // TLS 1.0 and 1.1 are deprecated and rejected for security
     if version != 0x0303 {
+<<<<<<< HEAD
         return Err(TlsError::InvalidVersion(version));
+=======
+        return Err(TlsError::InvalidVersion);
+>>>>>>> b1e6f03 (Feature: implement TLS record header validation and parsing (issue #2))
     }
 
     // Parse length (2 bytes, big-endian)
     let length = u16::from_be_bytes([bytes[3], bytes[4]]);
 
+<<<<<<< HEAD
     // Validate length - RFC 5246 and RFC 8446 specify maximum of 2^14 (16384) bytes
     if length > 16384 {
         return Err(TlsError::InvalidLength(length));
+=======
+    // Validate length - RFC 8446 specifies maximum of 2^14 (16384) bytes
+    if length > 16384 {
+        return Err(TlsError::InvalidLength);
+>>>>>>> b1e6f03 (Feature: implement TLS record header validation and parsing (issue #2))
     }
     Ok(RecordHeader::from((content_type, version, length)))
 }
