@@ -6,7 +6,16 @@ use std::convert::TryFrom;
 /// a TLS record layer message.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ContentType {
-    /// Invalid content type (value 0). Not used in valid TLS records.
+    /// Invalid content type (value 0).
+    ///
+    /// This value is reserved in TLS 1.3 and should **never** appear in valid TLS records.
+    /// This variant exists primarily for:
+    /// - Parsing and error handling when receiving malformed data
+    /// - Representing an uninitialized or error state in application logic
+    /// - Testing invalid protocol scenarios
+    ///
+    /// If you receive a record with this content type, it indicates a protocol violation
+    /// and the connection should typically be terminated with an alert.
     Invalid = 0,
     /// Change Cipher Spec protocol (value 20).
     /// Used for backward compatibility with TLS 1.2 and earlier.
@@ -169,6 +178,7 @@ mod tests {
         let high_edge_header = RecordHeader::new(ContentType::Handshake, 0x0303, 16640).unwrap();
         let low_header = RecordHeader::new(ContentType::Handshake, 0x0303, 128).unwrap();
         let low_edge_header = RecordHeader::new(ContentType::Handshake, 0x0303, 0).unwrap();
+        let invalid_header = RecordHeader::new(ContentType::Handshake, 0x0303, 20000);
 
         let high_bytes = high_header.to_bytes();
         let high_edge_bytes = high_edge_header.to_bytes();
@@ -179,6 +189,7 @@ mod tests {
         assert_eq!(high_edge_bytes, [22, 3, 3, 65, 0]);
         assert_eq!(low_bytes, [22, 3, 3, 0, 128]);
         assert_eq!(low_edge_bytes, [22, 3, 3, 0, 0]);
+        assert!(invalid_header.is_none());
     }
 
     #[test]
