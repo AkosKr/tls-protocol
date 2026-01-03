@@ -196,9 +196,11 @@ This project implements core components of the TLS 1.3 protocol as specified in 
   - `InvalidHandshakeType` - Non-ServerHello message
   - `InvalidVersion` - Incorrect legacy_version
   - `InvalidCipherSuite` - Unsupported cipher suite
-  - `InvalidRandom` - Malformed random field
-  - `DowngradeDetected` - Downgrade protection violation
+  - `InvalidCompressionMethod` - Invalid compression method value
+  - `InvalidRandom` - Reserved for future use (malformed random field handling)
+  - `DowngradeDetected` - Reserved for future use (downgrade as error instead of returned value)
   - Clear error types for all validation and parsing failures
+  - Note: Downgrade protection currently returns `Option<DowngradeProtection>` rather than an error
 
 **Testing**:
 - Valid ServerHello parsing and serialization
