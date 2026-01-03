@@ -103,7 +103,7 @@ impl ClientHello {
             .len()
             .checked_mul(2)
             .and_then(|v| u16::try_from(v).ok())
-            .expect("too many cipher suites to encode in ClientHello");
+            .expect("cipher suites count exceeds u16 maximum (32767 suites)");
         data.extend_from_slice(&cipher_suites_len.to_be_bytes());
         for suite in &self.cipher_suites {
             data.extend_from_slice(&suite.to_be_bytes());
@@ -123,7 +123,7 @@ impl ClientHello {
         let extensions_len: u16 = extensions_data
             .len()
             .try_into()
-            .expect("Total extensions data exceeds maximum encodable length");
+            .expect("extensions data length exceeds u16 maximum (65535 bytes)");
         data.extend_from_slice(&extensions_len.to_be_bytes());
         data.extend_from_slice(&extensions_data);
         
