@@ -88,11 +88,22 @@ impl ClientHello {
         data.extend_from_slice(&self.random);
         
         // Legacy session ID length (1 byte) + session ID
-        data.push(self.legacy_session_id.len() as u8);
+        let session_id_len = self.legacy_session_id.len();
+        assert!(
+            session_id_len <= 32,
+            "legacy_session_id length {} exceeds 32-byte maximum",
+            session_id_len
+        );
+        data.push(session_id_len as u8);
         data.extend_from_slice(&self.legacy_session_id);
         
         // Cipher suites length (2 bytes) + cipher suites
-        let cipher_suites_len = (self.cipher_suites.len() * 2) as u16;
+        let cipher_suites_len: u16 = self
+            .cipher_suites
+            .len()
+            .checked_mul(2)
+            .and_then(|v| u16::try_from(v).ok())
+            .expect("too many cipher suites to encode in ClientHello");
         data.extend_from_slice(&cipher_suites_len.to_be_bytes());
         for suite in &self.cipher_suites {
             data.extend_from_slice(&suite.to_be_bytes());
@@ -109,7 +120,11 @@ impl ClientHello {
         }
         
         // Extensions length (2 bytes) + extensions
-        data.extend_from_slice(&(extensions_data.len() as u16).to_be_bytes());
+        let extensions_len = extensions_data.len();
+        if extensions_len > u16::MAX as usize {
+            panic!("Total extensions data exceeds maximum encodable length (65535 bytes)");
+        }
+        data.extend_from_slice(&(extensions_len as u16).to_be_bytes());
         data.extend_from_slice(&extensions_data);
         
         // Now wrap in handshake message
