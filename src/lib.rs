@@ -40,7 +40,9 @@ impl TryFrom<u8> for ContentType {
     ///
     /// # Returns
     ///
-    /// - `Ok(ContentType)` if the byte corresponds to a valid content type (20, 21, 22, or 23)
+    /// - `Ok(ContentType)` if the byte corresponds to a known content type:
+    ///   - `0` maps to `ContentType::Invalid` (an invalid/placeholder content type)
+    ///   - `20`, `21`, `22`, and `23` map to the corresponding TLS content types
     /// - `Err(())` if the byte is not a recognized content type
     ///
     /// # Examples
