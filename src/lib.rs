@@ -1,5 +1,10 @@
 use std::convert::TryFrom;
 
+/// Maximum allowed length for a TLS record payload in bytes.
+/// 
+/// According to RFC 8446, this is 2^14 + 256 = 16640 bytes.
+pub const MAX_RECORD_LENGTH: u16 = (1 << 14) + 256;
+
 /// Represents the content type of a TLS record as defined in RFC 8446 (TLS 1.3).
 ///
 /// The content type indicates the higher-level protocol being encapsulated within
@@ -103,6 +108,7 @@ pub struct RecordHeader {
     pub length: u16,
 }
 
+
 impl RecordHeader {
     /// Creates a new `RecordHeader` with the specified parameters.
     ///
@@ -127,10 +133,9 @@ impl RecordHeader {
     /// let invalid_header = RecordHeader::new(ContentType::Handshake, 0x0303, 20000);
     /// assert!(invalid_header.is_none());
     /// ```
+    
     pub fn new(content_type: ContentType, version: u16, length: u16) -> Option<Self> {
-        const MAX_LENGTH: u16 = (1 << 14) + 256; // 2^14 + 256 = 16640 (TLS maximum record size)
-
-        if length > MAX_LENGTH {
+        if length > MAX_RECORD_LENGTH {
             return None;
         }
 
