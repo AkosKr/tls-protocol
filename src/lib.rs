@@ -1,6 +1,7 @@
 use std::convert::TryFrom;
 
 // Re-export modules for convenient access
+pub mod client_hello;
 pub mod decoder;
 pub mod error;
 pub mod extensions;
@@ -8,6 +9,8 @@ pub mod parser;
 pub mod tls_stream;
 
 // Re-export commonly used types
+pub use client_hello::ClientHello;
+pub use extensions::{Extension, KeyShareEntry};
 pub use decoder::decode_header;
 pub use error::TlsError;
 pub use parser::parse_header;
