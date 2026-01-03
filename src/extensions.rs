@@ -398,8 +398,15 @@ impl Extension {
             data.extend_from_slice(&ext.to_bytes());
         }
 
+        let data_len = data.len();
+        assert!(
+            data_len <= u16::MAX as usize,
+            "Total extensions length {} exceeds u16::MAX",
+            data_len
+        );
+
         let mut bytes = Vec::new();
-        bytes.extend_from_slice(&(data.len() as u16).to_be_bytes());
+        bytes.extend_from_slice(&(data_len as u16).to_be_bytes());
         bytes.extend_from_slice(&data);
 
         bytes
