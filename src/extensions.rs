@@ -124,12 +124,19 @@ impl Extension {
                 // Extension type
                 bytes.extend_from_slice(&EXT_SERVER_NAME.to_be_bytes());
 
-                // HostName as bytes, bounded so all lengths fit into u16.
+                // Validate hostname length fits in the protocol
                 let hostname_bytes = hostname.as_bytes();
-                // We need: ext_len = 2 + list_data.len() = 5 + hostname_len <= u16::MAX
+                let hostname_len = hostname_bytes.len();
+                
+                // Calculate max length that fits: ext_len = 2 + (1 + 2 + hostname_len) <= u16::MAX
                 // => hostname_len <= u16::MAX - 5
                 let max_hostname_len = (u16::MAX as usize).saturating_sub(5);
-                let hostname_len = hostname_bytes.len().min(max_hostname_len);
+                assert!(
+                    hostname_len <= max_hostname_len,
+                    "ServerName hostname length {} exceeds maximum {}",
+                    hostname_len,
+                    max_hostname_len
+                );
 
                 // Server Name List
                 let mut list_data = Vec::new();
@@ -137,8 +144,8 @@ impl Extension {
                 list_data.push(0x00);
                 // HostName length
                 list_data.extend_from_slice(&(hostname_len as u16).to_be_bytes());
-                // HostName (possibly truncated to max_hostname_len)
-                list_data.extend_from_slice(&hostname_bytes[..hostname_len]);
+                // HostName
+                list_data.extend_from_slice(hostname_bytes);
 
                 // Extension length (includes list length field)
                 let ext_len = 2 + list_data.len();

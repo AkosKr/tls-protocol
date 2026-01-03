@@ -255,21 +255,13 @@ fn test_key_share_extension_malformed_entries_length() {
 
 #[test]
 fn test_parse_extensions_length_mismatch() {
-    // Create valid extensions
-    let extensions = vec![
-        Extension::SupportedVersions(vec![TLS_VERSION_1_3]),
-    ];
-    
-    let mut bytes = Extension::serialize_extensions(&extensions);
-    // Add extra byte at the end (will cause length mismatch)
-    bytes.push(0xFF);
-    
-    // This should succeed because parse_extensions only checks the declared length
-    // But let's create a case where the declared length is incorrect
-    let mut bad_bytes = vec![0x00, 0xFF]; // Declare length of 255
-    bad_bytes.extend_from_slice(&[0x00, 0x2b]); // Extension type
-    bad_bytes.extend_from_slice(&[0x00, 0x03]); // Extension length
-    bad_bytes.extend_from_slice(&[0x02, 0x03, 0x04]); // Data
+    // Test case: declared extensions length exceeds available data
+    // This should fail with IncompleteData error
+    let mut bad_bytes = vec![0x00, 0xFF]; // Declare length of 255 bytes
+    bad_bytes.extend_from_slice(&[0x00, 0x2b]); // Extension type (43 = SupportedVersions)
+    bad_bytes.extend_from_slice(&[0x00, 0x03]); // Extension length (3 bytes)
+    bad_bytes.extend_from_slice(&[0x02, 0x03, 0x04]); // Extension data (3 bytes)
+    // Total available: 4 + 3 = 7 bytes, but declared length is 255
     
     let result = Extension::parse_extensions(&bad_bytes);
     assert!(result.is_err()); // Should fail due to incomplete data
