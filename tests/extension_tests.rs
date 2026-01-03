@@ -152,3 +152,117 @@ fn test_key_share_entry_serialization() {
     assert_eq!(consumed, bytes.len());
     assert_eq!(parsed, entry);
 }
+
+#[test]
+fn test_key_share_entry_from_bytes_too_short() {
+    // Test data with less than 4 bytes
+    let data = vec![0x00, 0x1d];
+    let result = KeyShareEntry::from_bytes(&data);
+    assert!(result.is_err());
+    
+    // Test data with incomplete key_exchange
+    let data = vec![0x00, 0x1d, 0x00, 0x20]; // Says 32 bytes but has 0
+    let result = KeyShareEntry::from_bytes(&data);
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_server_name_extension_malformed_list_length() {
+    // Extension with invalid list length
+    let mut bytes = vec![0x00, 0x00]; // Extension type
+    bytes.extend_from_slice(&[0x00, 0x05]); // Extension length
+    bytes.extend_from_slice(&[0x00, 0xFF]); // Invalid list length (larger than available data)
+    
+    let result = Extension::from_bytes(&bytes);
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_server_name_extension_empty_hostname() {
+    // Extension with empty hostname
+    let mut bytes = vec![0x00, 0x00]; // Extension type
+    bytes.extend_from_slice(&[0x00, 0x05]); // Extension length
+    bytes.extend_from_slice(&[0x00, 0x03]); // List length
+    bytes.push(0x00); // Name type: host_name
+    bytes.extend_from_slice(&[0x00, 0x00]); // Hostname length: 0
+    
+    let result = Extension::from_bytes(&bytes);
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_server_name_extension_too_long() {
+    // Extension with hostname longer than 255 characters
+    let long_hostname = "a".repeat(256);
+    let mut bytes = vec![0x00, 0x00]; // Extension type
+    let ext_len = 2 + 1 + 2 + 256;
+    bytes.extend_from_slice(&(ext_len as u16).to_be_bytes()); // Extension length
+    bytes.extend_from_slice(&((1 + 2 + 256) as u16).to_be_bytes()); // List length
+    bytes.push(0x00); // Name type: host_name
+    bytes.extend_from_slice(&[0x01, 0x00]); // Hostname length: 256
+    bytes.extend_from_slice(long_hostname.as_bytes());
+    
+    let result = Extension::from_bytes(&bytes);
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_signature_algorithms_extension_odd_length() {
+    // Extension with odd-length data (invalid since each algorithm is 2 bytes)
+    let mut bytes = vec![0x00, 0x0d]; // Extension type
+    bytes.extend_from_slice(&[0x00, 0x04]); // Extension length
+    bytes.extend_from_slice(&[0x00, 0x03]); // Algorithms length: 3 (odd, should be even)
+    bytes.extend_from_slice(&[0x04, 0x01, 0x05]); // Invalid data
+    
+    let result = Extension::from_bytes(&bytes);
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_supported_versions_extension_invalid_without_tls13() {
+    // SupportedVersions extension without TLS 1.3
+    let extensions = vec![
+        Extension::SupportedVersions(vec![TLS_VERSION_1_2]), // Only TLS 1.2
+        Extension::KeyShare(vec![KeyShareEntry::new(NAMED_GROUP_X25519, vec![0xaa; 32])]),
+    ];
+    
+    let result = validate_tls13_extensions(&extensions);
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_key_share_extension_empty_entries() {
+    // KeyShare extension with empty entries list
+    let extensions = vec![
+        Extension::SupportedVersions(vec![TLS_VERSION_1_3]),
+        Extension::KeyShare(vec![]), // Empty entries
+    ];
+    
+    let result = validate_tls13_extensions(&extensions);
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_key_share_extension_malformed_entries_length() {
+    // Extension with invalid entries length
+    let mut bytes = vec![0x00, 0x33]; // Extension type (51)
+    bytes.extend_from_slice(&[0x00, 0x05]); // Extension length
+    bytes.extend_from_slice(&[0x00, 0xFF]); // Invalid entries length (larger than available)
+    
+    let result = Extension::from_bytes(&bytes);
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_parse_extensions_length_mismatch() {
+    // Test case: declared extensions length exceeds available data
+    // This should fail with IncompleteData error
+    let mut bad_bytes = vec![0x00, 0xFF]; // Declare length of 255 bytes
+    bad_bytes.extend_from_slice(&[0x00, 0x2b]); // Extension type (43 = SupportedVersions)
+    bad_bytes.extend_from_slice(&[0x00, 0x03]); // Extension length (3 bytes)
+    bad_bytes.extend_from_slice(&[0x02, 0x03, 0x04]); // Extension data (3 bytes)
+    // Total available: 4 + 3 = 7 bytes, but declared length is 255
+    
+    let result = Extension::parse_extensions(&bad_bytes);
+    assert!(result.is_err()); // Should fail due to incomplete data
+}

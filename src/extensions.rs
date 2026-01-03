@@ -51,7 +51,9 @@ impl KeyShareEntry {
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut bytes = Vec::new();
         bytes.extend_from_slice(&self.group.to_be_bytes());
-        bytes.extend_from_slice(&(self.key_exchange.len() as u16).to_be_bytes());
+        let key_len = u16::try_from(self.key_exchange.len())
+            .expect("KeyShareEntry key_exchange length exceeds u16::MAX");
+        bytes.extend_from_slice(&key_len.to_be_bytes());
         bytes.extend_from_slice(&self.key_exchange);
         bytes
     }
@@ -122,14 +124,28 @@ impl Extension {
                 // Extension type
                 bytes.extend_from_slice(&EXT_SERVER_NAME.to_be_bytes());
 
+                // Validate hostname length fits in the protocol
+                let hostname_bytes = hostname.as_bytes();
+                let hostname_len = hostname_bytes.len();
+                
+                // Calculate max length that fits: ext_len = 2 + (1 + 2 + hostname_len) <= u16::MAX
+                // => hostname_len <= u16::MAX - 5
+                let max_hostname_len = (u16::MAX as usize).saturating_sub(5);
+                assert!(
+                    hostname_len <= max_hostname_len,
+                    "ServerName hostname length {} exceeds maximum {}",
+                    hostname_len,
+                    max_hostname_len
+                );
+
                 // Server Name List
                 let mut list_data = Vec::new();
                 // Name Type: host_name (0)
                 list_data.push(0x00);
                 // HostName length
-                list_data.extend_from_slice(&(hostname.len() as u16).to_be_bytes());
+                list_data.extend_from_slice(&(hostname_len as u16).to_be_bytes());
                 // HostName
-                list_data.extend_from_slice(hostname.as_bytes());
+                list_data.extend_from_slice(hostname_bytes);
 
                 // Extension length (includes list length field)
                 let ext_len = 2 + list_data.len();
@@ -147,10 +163,21 @@ impl Extension {
 
                 // Extension length (2 bytes for list length + algorithms)
                 let data_len = 2 + algorithms.len() * 2;
+                assert!(
+                    data_len <= u16::MAX as usize,
+                    "SignatureAlgorithms extension data length {} exceeds u16::MAX",
+                    data_len
+                );
                 bytes.extend_from_slice(&(data_len as u16).to_be_bytes());
 
                 // Algorithms length
-                bytes.extend_from_slice(&((algorithms.len() * 2) as u16).to_be_bytes());
+                let algorithms_len_bytes = algorithms.len() * 2;
+                assert!(
+                    algorithms_len_bytes <= u16::MAX as usize,
+                    "SignatureAlgorithms length {} exceeds u16::MAX",
+                    algorithms_len_bytes
+                );
+                bytes.extend_from_slice(&(algorithms_len_bytes as u16).to_be_bytes());
 
                 // Algorithms
                 for &algo in algorithms {
@@ -164,10 +191,21 @@ impl Extension {
 
                 // Extension length (1 byte for versions length + versions)
                 let data_len = 1 + versions.len() * 2;
+                assert!(
+                    data_len <= u16::MAX as usize,
+                    "SupportedVersions extension data length {} exceeds u16::MAX",
+                    data_len
+                );
                 bytes.extend_from_slice(&(data_len as u16).to_be_bytes());
 
-                // Versions length
-                bytes.push((versions.len() * 2) as u8);
+                // Versions length (in bytes)
+                let versions_len_bytes = versions.len() * 2;
+                assert!(
+                    versions_len_bytes <= u8::MAX as usize,
+                    "SupportedVersions versions length {} exceeds u8::MAX",
+                    versions_len_bytes
+                );
+                bytes.push(versions_len_bytes as u8);
 
                 // Versions
                 for &version in versions {
@@ -187,10 +225,21 @@ impl Extension {
 
                 // Extension length (2 bytes for entries length + entries)
                 let ext_len = 2 + entries_data.len();
+                assert!(
+                    ext_len <= u16::MAX as usize,
+                    "KeyShare extension length {} exceeds u16::MAX",
+                    ext_len
+                );
                 bytes.extend_from_slice(&(ext_len as u16).to_be_bytes());
 
                 // Client Key Share Length
-                bytes.extend_from_slice(&(entries_data.len() as u16).to_be_bytes());
+                let entries_len = entries_data.len();
+                assert!(
+                    entries_len <= u16::MAX as usize,
+                    "KeyShare entries length {} exceeds u16::MAX",
+                    entries_len
+                );
+                bytes.extend_from_slice(&(entries_len as u16).to_be_bytes());
 
                 // Entries
                 bytes.extend_from_slice(&entries_data);
@@ -201,6 +250,11 @@ impl Extension {
                 bytes.extend_from_slice(&extension_type.to_be_bytes());
 
                 // Extension length
+                assert!(
+                    data.len() <= u16::MAX as usize,
+                    "Unknown extension data length {} exceeds u16::MAX",
+                    data.len()
+                );
                 bytes.extend_from_slice(&(data.len() as u16).to_be_bytes());
 
                 // Extension data
@@ -268,6 +322,20 @@ impl Extension {
                 let hostname_bytes = &list_data[3..3 + name_length];
                 let hostname = String::from_utf8(hostname_bytes.to_vec())
                     .map_err(|_| TlsError::InvalidExtensionData("Invalid UTF-8 in ServerName".to_string()))?;
+
+                // Validate hostname length (RFC standards typically limit to 255 characters)
+                if hostname.len() > 255 {
+                    return Err(TlsError::InvalidExtensionData(
+                        format!("ServerName hostname too long: {} characters (max 255)", hostname.len())
+                    ));
+                }
+
+                // Validate hostname format: must not be empty and should contain valid DNS characters
+                if hostname.is_empty() {
+                    return Err(TlsError::InvalidExtensionData(
+                        "ServerName hostname is empty".to_string()
+                    ));
+                }
 
                 Extension::ServerName(hostname)
             }
@@ -354,6 +422,12 @@ impl Extension {
                     offset += consumed;
                 }
 
+                if offset != end {
+                    return Err(TlsError::InvalidExtensionData(
+                        "KeyShare entries length mismatch".to_string(),
+                    ));
+                }
+
                 Extension::KeyShare(entries)
             }
 
@@ -385,6 +459,12 @@ impl Extension {
             let (ext, consumed) = Extension::from_bytes(&bytes[offset..])?;
             extensions.push(ext);
             offset += consumed;
+        }
+
+        if offset != end {
+            return Err(TlsError::InvalidExtensionData(
+                "Extensions length mismatch".to_string(),
+            ));
         }
 
         Ok(extensions)
