@@ -14,6 +14,18 @@ pub enum TlsError {
     /// Invalid record length
     /// Carries the received record length.
     InvalidLength(u16),
+    /// Unknown or unsupported extension type
+    /// Carries the extension type identifier.
+    UnknownExtension(u16),
+    /// Missing mandatory TLS extension
+    /// Carries the name of the missing extension.
+    MissingMandatoryExtension(&'static str),
+    /// Invalid extension data format
+    /// Carries a description of the error.
+    InvalidExtensionData(String),
+    /// Duplicate extension detected
+    /// Carries the extension type identifier.
+    DuplicateExtension(u16),
 }
 
 impl fmt::Display for TlsError {
@@ -28,6 +40,18 @@ impl fmt::Display for TlsError {
             TlsError::IncompleteData => write!(f, "Incomplete data"),
             TlsError::InvalidLength(length) => {
                 write!(f, "Invalid record length: {length}")
+            }
+            TlsError::UnknownExtension(ext_type) => {
+                write!(f, "Unknown or unsupported extension: 0x{ext_type:04x}")
+            }
+            TlsError::MissingMandatoryExtension(ext_name) => {
+                write!(f, "Missing mandatory TLS extension: {ext_name}")
+            }
+            TlsError::InvalidExtensionData(desc) => {
+                write!(f, "Invalid extension data: {desc}")
+            }
+            TlsError::DuplicateExtension(ext_type) => {
+                write!(f, "Duplicate extension detected: 0x{ext_type:04x}")
             }
         }
     }
