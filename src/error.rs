@@ -41,6 +41,14 @@ pub enum TlsError {
     InvalidRandom,
     /// Downgrade protection violation detected (reserved for future use)
     DowngradeDetected,
+    /// Invalid key length for X25519
+    /// Carries the received key length.
+    InvalidKeyLength(usize),
+    /// Invalid public key (weak, malformed, or non-canonical)
+    InvalidPublicKey,
+    /// Key exchange failed
+    /// Carries a description of the error.
+    KeyExchangeFailed(String),
 }
 
 impl fmt::Display for TlsError {
@@ -82,6 +90,15 @@ impl fmt::Display for TlsError {
             }
             TlsError::DowngradeDetected => {
                 write!(f, "Downgrade protection violation detected")
+            }
+            TlsError::InvalidKeyLength(length) => {
+                write!(f, "Invalid key length: {length} bytes, expected 32 bytes for X25519")
+            }
+            TlsError::InvalidPublicKey => {
+                write!(f, "Invalid public key: weak, malformed, or non-canonical value")
+            }
+            TlsError::KeyExchangeFailed(desc) => {
+                write!(f, "Key exchange failed: {desc}")
             }
         }
     }

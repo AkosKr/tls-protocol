@@ -81,9 +81,23 @@ fn test_write_record_alert() {
     
     let server_handle = thread::spawn(move || {
         let (mut stream, _) = listener.accept().expect("Failed to accept connection");
+        stream.set_read_timeout(Some(Duration::from_secs(5))).expect("Failed to set timeout");
         let mut buffer = vec![0u8; 1024];
-        let n = stream.read(&mut buffer).expect("Failed to read from stream");
-        buffer.truncate(n);
+        let mut total_read = 0;
+        let expected_bytes = 7; // 5 byte header + 2 byte payload
+        
+        // Read until we get all the data
+        loop {
+            match stream.read(&mut buffer[total_read..]) {
+                Ok(0) => break,
+                Ok(n) => total_read += n,
+                Err(e) => panic!("Failed to read from stream: {}", e),
+            }
+            if total_read >= expected_bytes {
+                break;
+            }
+        }
+        buffer.truncate(total_read);
         buffer
     });
     
@@ -178,9 +192,23 @@ fn test_write_multiple_records() {
     
     let server_handle = thread::spawn(move || {
         let (mut stream, _) = listener.accept().expect("Failed to accept connection");
+        stream.set_read_timeout(Some(Duration::from_secs(5))).expect("Failed to set timeout");
         let mut buffer = vec![0u8; 1024];
-        let n = stream.read(&mut buffer).expect("Failed to read from stream");
-        buffer.truncate(n);
+        let mut total_read = 0;
+        let expected_bytes = 21; // 10 bytes for first record + 11 bytes for second record
+        
+        // Read until we get all the data (multiple records may arrive separately)
+        loop {
+            match stream.read(&mut buffer[total_read..]) {
+                Ok(0) => break, // Connection closed
+                Ok(n) => total_read += n,
+                Err(e) => panic!("Failed to read from stream: {}", e),
+            }
+            if total_read >= expected_bytes {
+                break;
+            }
+        }
+        buffer.truncate(total_read);
         buffer
     });
     
