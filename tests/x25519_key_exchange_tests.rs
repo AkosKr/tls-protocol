@@ -11,7 +11,7 @@
 use tls_protocol::error::TlsError;
 use tls_protocol::extensions::{KeyShareEntry, NAMED_GROUP_X25519, NAMED_GROUP_SECP256R1};
 use tls_protocol::x25519_key_exchange::{
-    compute_shared_secret, parse_key_share_entry, X25519KeyPair, X25519_KEY_SIZE,
+    parse_key_share_entry, X25519KeyPair, X25519_KEY_SIZE,
 };
 
 // ============================================================================
@@ -126,9 +126,9 @@ fn test_compute_shared_secret_standalone_function() {
     let alice = X25519KeyPair::generate();
     let bob = X25519KeyPair::generate();
 
-    // Test the standalone compute_shared_secret function
-    let shared = compute_shared_secret(alice.private_key, &bob.public_key_bytes())
-        .expect("Standalone shared secret computation failed");
+    // Test shared secret computation using the keypair method
+    let shared = alice.compute_shared_secret(&bob.public_key_bytes())
+        .expect("Shared secret computation failed");
 
     assert_eq!(shared.len(), X25519_KEY_SIZE);
     assert!(shared.iter().any(|&b| b != 0));
@@ -234,11 +234,11 @@ fn test_reject_all_zero_key_in_key_share_entry() {
 
 #[test]
 fn test_reject_all_zero_key_with_standalone_function() {
-    // Test that the standalone compute_shared_secret also rejects all-zero keys
+    // Test that compute_shared_secret also rejects all-zero keys
     let zero_key = [0u8; X25519_KEY_SIZE];
     let keypair = X25519KeyPair::generate();
 
-    let result = compute_shared_secret(keypair.private_key, &zero_key);
+    let result = keypair.compute_shared_secret(&zero_key);
 
     // Should reject with InvalidPublicKey error
     assert!(result.is_err());

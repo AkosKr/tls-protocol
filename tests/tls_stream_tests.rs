@@ -81,6 +81,7 @@ fn test_write_record_alert() {
     
     let server_handle = thread::spawn(move || {
         let (mut stream, _) = listener.accept().expect("Failed to accept connection");
+        stream.set_read_timeout(Some(Duration::from_secs(5))).expect("Failed to set timeout");
         let mut buffer = vec![0u8; 1024];
         let mut total_read = 0;
         let expected_bytes = 7; // 5 byte header + 2 byte payload
@@ -191,6 +192,7 @@ fn test_write_multiple_records() {
     
     let server_handle = thread::spawn(move || {
         let (mut stream, _) = listener.accept().expect("Failed to accept connection");
+        stream.set_read_timeout(Some(Duration::from_secs(5))).expect("Failed to set timeout");
         let mut buffer = vec![0u8; 1024];
         let mut total_read = 0;
         let expected_bytes = 21; // 10 bytes for first record + 11 bytes for second record
