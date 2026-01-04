@@ -8,6 +8,7 @@ pub mod extensions;
 pub mod parser;
 pub mod server_hello;
 pub mod tls_stream;
+pub mod x25519_key_exchange;
 
 // Re-export commonly used types
 pub use client_hello::ClientHello;
@@ -16,6 +17,7 @@ pub use decoder::decode_header;
 pub use error::TlsError;
 pub use parser::parse_header;
 pub use server_hello::ServerHello;
+pub use x25519_key_exchange::{X25519KeyPair, compute_shared_secret, parse_key_share_entry};
 
 /// Maximum allowed length for a TLS record payload in bytes.
 /// 

@@ -215,6 +215,64 @@ This project implements core components of the TLS 1.3 protocol as specified in 
 
 **Files**: [src/server_hello.rs](src/server_hello.rs), [tests/server_hello_tests.rs](tests/server_hello_tests.rs), [src/error.rs](src/error.rs)
 
+### Issue #12: X25519 Key Exchange Implementation ✅
+**Goal**: Implement ephemeral ECDHE using X25519 for secure key exchange in TLS 1.3.
+
+**Implementation**:
+- **X25519 Key Pair Generation**:
+  - `X25519KeyPair` struct containing private and public keys
+  - `generate()` - Generates ephemeral X25519 keypairs using cryptographically secure randomness
+  - Keys are exactly 32 bytes (per RFC 8446, Section 4.2.8.2)
+  - Each connection uses a fresh keypair for forward secrecy
+
+- **Key Exchange Operations**:
+  - `compute_shared_secret()` - Performs ECDH scalar multiplication
+  - Returns 32-byte shared secret suitable for HKDF in TLS 1.3 key schedule
+  - Supports both method and standalone function interfaces
+  - Constant-time implementation via x25519-dalek for side-channel resistance
+
+- **Server Key Share Parsing & Validation**:
+  - `parse_key_share_entry()` - Extracts and validates X25519 public keys from KeyShareEntry
+  - Validates named group matches X25519 (0x001d)
+  - Ensures key exchange data is exactly 32 bytes
+  - Rejects weak or invalid public keys
+
+- **Key Validation** (RFC 8446 compliance):
+  - Strict 32-byte key length enforcement
+  - Rejects all-zero public keys (weak/invalid keys)
+  - Rejects non-canonical values and malformed keys
+  - Comprehensive error handling for all validation failures
+
+- **Integration with TLS Extensions**:
+  - `to_key_share_entry()` - Creates KeyShareEntry from X25519KeyPair
+  - Seamless integration with existing Extension framework
+  - Compatible with ClientHello and ServerHello messages
+  - Works with extension serialization/deserialization
+
+- **Error Handling**:
+  - `InvalidKeyLength` - Wrong key size (not 32 bytes)
+  - `InvalidPublicKey` - Weak, malformed, or non-canonical keys
+  - `KeyExchangeFailed` - Group mismatch or other exchange errors
+
+- **Security Features**:
+  - Ephemeral keys provide forward secrecy
+  - Constant-time operations prevent timing attacks
+  - Proper validation prevents weak key attacks
+  - Shared secrets ready for HKDF (RFC 8446, Section 7.1)
+
+**Testing** (Issue #12 requirements):
+- Key pair generation and randomness verification
+- Shared secret agreement between parties
+- Invalid key length rejection (shorter, longer, empty, very long)
+- Non-canonical value rejection (all-zero, weak keys)
+- KeyShareEntry parsing and validation
+- Wrong named group rejection
+- Full TLS 1.3 handshake flow simulation
+- HKDF suitability verification
+- Serialization round-trip with extension framework
+
+**Files**: [src/x25519_key_exchange.rs](src/x25519_key_exchange.rs), [tests/x25519_key_exchange_tests.rs](tests/x25519_key_exchange_tests.rs), [src/error.rs](src/error.rs)
+
 ## Project Structure
 
 ```
@@ -227,13 +285,15 @@ tls-protocol/
 │   ├── tls_stream.rs       # TCP stream wrapper
 │   ├── extensions.rs       # TLS extensions framework
 │   ├── client_hello.rs     # ClientHello message implementation
-│   └── server_hello.rs     # ServerHello message parser
+│   ├── server_hello.rs     # ServerHello message parser
+│   └── x25519_key_exchange.rs # X25519 key exchange implementation
 ├── tests/
 │   ├── parser_tests.rs     # Parser validation tests
 │   ├── decoder_tests.rs    # Decoder tests
 │   ├── tls_stream_tests.rs # Stream tests
 │   ├── client_hello_tests.rs # ClientHello tests
-│   └── server_hello_tests.rs # ServerHello parser tests
+│   ├── server_hello_tests.rs # ServerHello parser tests
+│   └── x25519_key_exchange_tests.rs # X25519 key exchange tests
 ├── examples/
 │   ├── client.rs           # Example TLS client
 │   └── server.rs           # Example TLS server
@@ -286,6 +346,75 @@ let bytes = Extension::serialize_extensions(&extensions);
 
 // Parse extensions from bytes
 let parsed = Extension::parse_extensions(&bytes).expect("Failed to parse extensions");
+```
+
+### X25519 Key Exchange
+
+```rust
+use tls_protocol::x25519_key_exchange::X25519KeyPair;
+use tls_protocol::extensions::{Extension, NAMED_GROUP_X25519};
+
+// Generate ephemeral X25519 keypair for client
+let client_keypair = X25519KeyPair::generate();
+
+// Create KeyShareEntry for ClientHello
+let client_key_share = client_keypair.to_key_share_entry();
+let key_share_extension = Extension::KeyShare(vec![client_key_share]);
+
+// ... send ClientHello with key_share_extension ...
+
+// After receiving ServerHello with server's KeyShareEntry
+use tls_protocol::x25519_key_exchange::parse_key_share_entry;
+
+// Extract server's public key from KeyShareEntry
+// let server_key_share = ...; // from ServerHello extensions
+// let server_public_key = parse_key_share_entry(&server_key_share)
+//     .expect("Invalid server key share");
+
+// Compute shared secret (for key schedule)
+// let shared_secret = client_keypair
+//     .compute_shared_secret(&server_public_key)
+//     .expect("Key exchange failed");
+
+// The shared_secret is 32 bytes and ready for HKDF in TLS 1.3 key schedule
+```
+
+### Complete Key Exchange Example
+
+```rust
+use tls_protocol::x25519_key_exchange::{X25519KeyPair, parse_key_share_entry};
+use tls_protocol::extensions::NAMED_GROUP_X25519;
+
+// Client side: Generate keypair and create ClientHello
+let client_keypair = X25519KeyPair::generate();
+let client_key_share = client_keypair.to_key_share_entry();
+// ... include client_key_share in ClientHello ...
+
+// Server side: Receive ClientHello and generate server keypair
+let client_public_key = parse_key_share_entry(&client_key_share)
+    .expect("Invalid client key share");
+
+let server_keypair = X25519KeyPair::generate();
+let server_key_share = server_keypair.to_key_share_entry();
+
+// Server computes shared secret
+let server_shared = server_keypair
+    .compute_shared_secret(&client_public_key)
+    .expect("Server key exchange failed");
+
+// ... send ServerHello with server_key_share ...
+
+// Client side: Receive ServerHello and compute shared secret
+let server_public_key = parse_key_share_entry(&server_key_share)
+    .expect("Invalid server key share");
+
+let client_shared = client_keypair
+    .compute_shared_secret(&server_public_key)
+    .expect("Client key exchange failed");
+
+// Both parties now have the same shared secret
+assert_eq!(client_shared, server_shared);
+// Use shared_secret for HKDF in key schedule (RFC 8446, Section 7.1)
 ```
 
 ### Working with TLS Records
@@ -395,6 +524,7 @@ cargo run --example client
 ## Dependencies
 
 - `rand = "0.8"` - For cryptographically secure random number generation
+- `x25519-dalek = "2.0"` - Constant-time X25519 elliptic curve Diffie-Hellman implementation
 
 ## References
 
