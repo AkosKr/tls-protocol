@@ -16,7 +16,7 @@ pub const X25519_KEY_SIZE: usize = 32;
 /// X25519 KeyPair for ephemeral Diffie-Hellman key exchange in TLS 1.3.
 pub struct X25519KeyPair {
     /// Private key (kept secret)
-    pub private_key: EphemeralSecret,
+    private_key: EphemeralSecret,
     /// Public key (sent in KeyShareEntry)
     pub public_key: PublicKey,
 }
