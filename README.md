@@ -273,6 +273,64 @@ This project implements core components of the TLS 1.3 protocol as specified in 
 
 **Files**: [src/x25519_key_exchange.rs](src/x25519_key_exchange.rs), [tests/x25519_key_exchange_tests.rs](tests/x25519_key_exchange_tests.rs), [src/error.rs](src/error.rs)
 
+### Issue #13: HKDF-based Key Derivation Pipeline ✅
+**Goal**: Implement complete TLS 1.3 key schedule using HKDF (RFC 5869) with SHA-256, following RFC 8446 Sections 7.1 and 7.2.
+
+**Implementation**:
+- **HKDF Core Functions (RFC 5869)**:
+  - `hkdf_extract(salt, ikm)` - Extract phase producing pseudorandom key (PRK)
+  - `hkdf_expand(prk, info, length)` - Expand phase generating output keying material (OKM)
+  - `hkdf_expand_label()` - TLS 1.3-specific wrapper with "tls13 " prefix
+  - `derive_secret()` - Combines HKDF-Expand-Label with transcript hash
+
+- **KeySchedule Struct - Complete TLS 1.3 Key Schedule**:
+  - Manages progression through three stages: Early → Handshake → Master
+  - `new()` - Initialize with Early Secret (no PSK case)
+  - `with_psk(psk)` - Initialize with pre-shared key
+  - `advance_to_handshake_secret(shared_secret)` - Progress using ECDHE output
+  - `advance_to_master_secret()` - Final stage transition
+  
+- **Traffic Secret Derivation**:
+  - `derive_client_handshake_traffic_secret(transcript)` - Client handshake encryption keys
+  - `derive_server_handshake_traffic_secret(transcript)` - Server handshake encryption keys
+  - `derive_client_application_traffic_secret(transcript)` - Client application data keys
+  - `derive_server_application_traffic_secret(transcript)` - Server application data keys
+  - `derive_exporter_master_secret(transcript)` - For key exporters
+  - `derive_resumption_master_secret(transcript)` - For session resumption
+
+- **Key Schedule Flow**:
+  ```text
+  PSK/0 → Early Secret
+           ↓
+  (EC)DHE → Handshake Secret → {client_hs_traffic, server_hs_traffic}
+           ↓
+  0 → Master Secret → {client_ap_traffic, server_ap_traffic, 
+                      exporter_master, resumption_master}
+  ```
+
+- **Input Requirements**:
+  - Shared secret from X25519 ECDHE (32 bytes)
+  - Transcript hashes at various stages (SHA-256, 32 bytes)
+  - Optional PSK for 0-RTT scenarios
+
+- **Output Secrets**:
+  - All secrets are 32 bytes (SHA-256 hash length)
+  - Handshake traffic secrets protect handshake messages
+  - Application traffic secrets protect application data
+  - Master secrets support session resumption and key export
+
+**Testing** (Issue #13 requirements):
+- RFC 5869 test vectors for HKDF-Extract and HKDF-Expand (Test Cases 1 & 2)
+- Edge cases: zero-length salt, empty info, various input lengths
+- Complete key schedule progression (Early → Handshake → Master)
+- Different shared secrets produce different keys
+- Different transcripts produce different traffic secrets
+- Stage enforcement (cannot skip stages or go backwards)
+- Deterministic output verification
+- Integration with X25519 key exchange output
+
+**Files**: [src/key_schedule.rs](src/key_schedule.rs), [tests/key_schedule_tests.rs](tests/key_schedule_tests.rs)
+
 ## Project Structure
 
 ```
@@ -286,14 +344,16 @@ tls-protocol/
 │   ├── extensions.rs       # TLS extensions framework
 │   ├── client_hello.rs     # ClientHello message implementation
 │   ├── server_hello.rs     # ServerHello message parser
-│   └── x25519_key_exchange.rs # X25519 key exchange implementation
+│   ├── x25519_key_exchange.rs # X25519 key exchange implementation
+│   └── key_schedule.rs     # HKDF-based key derivation pipeline
 ├── tests/
 │   ├── parser_tests.rs     # Parser validation tests
 │   ├── decoder_tests.rs    # Decoder tests
 │   ├── tls_stream_tests.rs # Stream tests
 │   ├── client_hello_tests.rs # ClientHello tests
 │   ├── server_hello_tests.rs # ServerHello parser tests
-│   └── x25519_key_exchange_tests.rs # X25519 key exchange tests
+│   ├── x25519_key_exchange_tests.rs # X25519 key exchange tests
+│   └── key_schedule_tests.rs # HKDF and key schedule tests
 ├── examples/
 │   ├── client.rs           # Example TLS client
 │   └── server.rs           # Example TLS server
@@ -415,6 +475,139 @@ let client_shared = client_keypair
 // Both parties now have the same shared secret
 assert_eq!(client_shared, server_shared);
 // Use shared_secret for HKDF in key schedule (RFC 8446, Section 7.1)
+```
+
+### TLS 1.3 Key Schedule with HKDF
+
+```rust
+use tls_protocol::key_schedule::KeySchedule;
+use sha2::{Digest, Sha256};
+
+// Step 1: Initialize key schedule (Early Secret stage)
+let mut key_schedule = KeySchedule::new();
+
+// Step 2: After ECDHE, advance to Handshake Secret
+// shared_secret comes from X25519KeyPair::compute_shared_secret()
+let shared_secret = [0xAAu8; 32]; // 32-byte output from X25519
+key_schedule.advance_to_handshake_secret(&shared_secret);
+
+// Step 3: Derive handshake traffic secrets for encryption
+// Transcript hash includes ClientHello...ServerHello
+let mut transcript = Sha256::new();
+transcript.update(b"ClientHello_bytes");
+transcript.update(b"ServerHello_bytes");
+let transcript_hash = transcript.finalize();
+
+let client_hs_traffic = key_schedule
+    .derive_client_handshake_traffic_secret(&transcript_hash);
+let server_hs_traffic = key_schedule
+    .derive_server_handshake_traffic_secret(&transcript_hash);
+
+// Use these secrets to derive handshake encryption keys...
+
+// Step 4: After handshake completes, advance to Master Secret
+key_schedule.advance_to_master_secret();
+
+// Step 5: Derive application traffic secrets for protected data
+// Transcript now includes up to server Finished
+let mut app_transcript = Sha256::new();
+app_transcript.update(b"ClientHello_bytes");
+app_transcript.update(b"ServerHello_bytes");
+app_transcript.update(b"ServerFinished_bytes");
+let app_transcript_hash = app_transcript.finalize();
+
+let client_app_traffic = key_schedule
+    .derive_client_application_traffic_secret(&app_transcript_hash);
+let server_app_traffic = key_schedule
+    .derive_server_application_traffic_secret(&app_transcript_hash);
+
+// Optional: Derive other master secrets
+let exporter_master = key_schedule
+    .derive_exporter_master_secret(&app_transcript_hash);
+let resumption_master = key_schedule
+    .derive_resumption_master_secret(&app_transcript_hash);
+```
+
+### Complete TLS 1.3 Handshake Flow
+
+```rust
+use tls_protocol::{ClientHello, ServerHello, KeySchedule, X25519KeyPair};
+use tls_protocol::extensions::{Extension, KeyShareEntry, TLS_VERSION_1_3, NAMED_GROUP_X25519};
+use sha2::{Digest, Sha256};
+
+// Client Side
+// -----------
+
+// 1. Generate X25519 keypair
+let client_keypair = X25519KeyPair::generate();
+
+// 2. Create ClientHello with key share
+let random = rand::random();
+let client_hello = ClientHello::default_tls13(
+    random,
+    client_keypair.public_key_bytes().to_vec()
+);
+
+// Send ClientHello and start transcript hash
+let mut transcript = Sha256::new();
+transcript.update(&client_hello.to_bytes());
+
+// Server Side
+// -----------
+
+// 3. Receive ClientHello, generate server keypair
+let server_keypair = X25519KeyPair::generate();
+
+// 4. Extract client's public key from ClientHello extensions
+// (parse from received client_hello)
+let client_public_key = [0xBBu8; 32]; // extracted from ClientHello
+
+// 5. Compute ECDHE shared secret
+let shared_secret = server_keypair
+    .compute_shared_secret(&client_public_key)
+    .expect("Key exchange failed");
+
+// 6. Create ServerHello with server key share
+let server_random = rand::random();
+let server_hello = ServerHello::new(
+    server_random,
+    vec![],
+    0x1301, // TLS_AES_128_GCM_SHA256
+    vec![
+        Extension::SupportedVersions(vec![TLS_VERSION_1_3]),
+        Extension::KeyShare(vec![server_keypair.to_key_share_entry()]),
+    ]
+);
+
+// Send ServerHello and update transcript
+transcript.update(&server_hello.to_bytes());
+let handshake_transcript = transcript.finalize_reset();
+
+// 7. Initialize key schedule and derive handshake keys
+let mut key_schedule = KeySchedule::new();
+key_schedule.advance_to_handshake_secret(&shared_secret);
+
+let server_hs_traffic = key_schedule
+    .derive_server_handshake_traffic_secret(&handshake_transcript);
+let client_hs_traffic = key_schedule
+    .derive_client_handshake_traffic_secret(&handshake_transcript);
+
+// Use handshake traffic secrets for encrypting remaining handshake...
+
+// 8. After handshake finishes, derive application keys
+transcript.update(b"EncryptedExtensions");
+transcript.update(b"Certificate");
+transcript.update(b"CertificateVerify");
+transcript.update(b"ServerFinished");
+let app_transcript = transcript.finalize();
+
+key_schedule.advance_to_master_secret();
+let server_app_traffic = key_schedule
+    .derive_server_application_traffic_secret(&app_transcript);
+let client_app_traffic = key_schedule
+    .derive_client_application_traffic_secret(&app_transcript);
+
+// Now ready to encrypt/decrypt application data!
 ```
 
 ### Working with TLS Records
