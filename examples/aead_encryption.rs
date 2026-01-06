@@ -44,22 +44,26 @@ fn main() {
     // Step 5: Encrypt a handshake message (Client → Server)
     let plaintext = b"Encrypted Handshake Message";
     let content_type = ContentType::Handshake as u8;
+    let padding_len = 0;
     
     // Construct AAD (TLS record header)
-    let inner_len = plaintext.len() + 1; // content + content_type
-    let record_len = (inner_len + 16) as u16; // + authentication tag
+    // The AAD contains the length of the encrypted record that will be sent.
+    // Encrypted record structure: AEAD_Encrypt(content || content_type || padding)
+    // Final ciphertext length = len(content) + 1 + padding_len + TAG_SIZE
+    let inner_plaintext_len = plaintext.len() + 1 + padding_len; // content + content_type + padding
+    let encrypted_record_len = (inner_plaintext_len + 16) as u16; // + authentication tag
     let aad = [
         ContentType::ApplicationData as u8, // TLS 1.3 opaque type
         0x03, 0x03, // TLS 1.2 legacy version
-        (record_len >> 8) as u8,
-        (record_len & 0xff) as u8,
+        (encrypted_record_len >> 8) as u8,
+        (encrypted_record_len & 0xff) as u8,
     ];
     
     println!("Encrypting record:");
     println!("  Plaintext: {} bytes", plaintext.len());
     println!("  AAD (record header): {:?}", aad);
     
-    let ciphertext = encrypt_record(&mut client_send, plaintext, content_type, &aad, 0).unwrap();
+    let ciphertext = encrypt_record(&mut client_send, plaintext, content_type, &aad, padding_len).unwrap();
     println!("  Ciphertext: {} bytes", ciphertext.len());
     println!("  Client sequence number after encrypt: {}\n", client_send.sequence_number());
 
@@ -79,7 +83,7 @@ fn main() {
     key_schedule.advance_to_master_secret();
     
     let mut app_hasher = Sha256::new();
-    app_hasher.update(&transcript_hash);
+    app_hasher.update(transcript_hash);
     app_hasher.update(b"Finished");
     let app_transcript = app_hasher.finalize();
     
@@ -98,8 +102,9 @@ fn main() {
     // Step 8: Encrypt application data
     println!("Encrypting application data:");
     let app_data = b"GET / HTTP/1.1\r\nHost: example.com\r\n\r\n";
-    let app_inner_len = app_data.len() + 1;
-    let app_record_len = (app_inner_len + 16) as u16;
+    let app_padding_len = 0;
+    let app_inner_len = app_data.len() + 1 + app_padding_len; // content + content_type + padding
+    let app_record_len = (app_inner_len + 16) as u16; // + authentication tag
     let app_aad = [
         ContentType::ApplicationData as u8,
         0x03, 0x03,
@@ -112,7 +117,7 @@ fn main() {
         app_data,
         ContentType::ApplicationData as u8,
         &app_aad,
-        0,
+        app_padding_len,
     ).unwrap();
     
     println!("  Application data: {} bytes", app_data.len());
@@ -127,7 +132,9 @@ fn main() {
     println!("Exchanging multiple records:");
     for i in 1..=5 {
         let msg = format!("Message {}", i).into_bytes();
-        let len = (msg.len() + 1 + 16) as u16;
+        let msg_padding_len = 0;
+        let msg_inner_len = msg.len() + 1 + msg_padding_len; // content + content_type + padding
+        let len = (msg_inner_len + 16) as u16; // + authentication tag
         let aad = [
             ContentType::ApplicationData as u8,
             0x03, 0x03,
@@ -140,7 +147,7 @@ fn main() {
             &msg,
             ContentType::ApplicationData as u8,
             &aad,
-            0,
+            msg_padding_len,
         ).unwrap();
         
         let (dec, _) = decrypt_record(&mut server_app_recv, &ct, &aad).unwrap();

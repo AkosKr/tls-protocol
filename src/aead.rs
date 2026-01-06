@@ -53,11 +53,44 @@
 //! ```
 //!
 //! # Security Considerations
+//!
+//! ## Nonce Uniqueness and Sequence Numbers
 //! - Sequence numbers must never repeat for a given key
 //! - Maximum of 2^64-1 records can be encrypted per traffic secret
+//! - After sequence number exhaustion, traffic keys must be updated
+//!
+//! ## Authentication and Error Handling
 //! - Failed authentication MUST result in connection termination
-//! - Timing side channels should be minimized (constant-time operations)
-//! - Keys and IVs should be zeroized after use
+//! - No distinction should be made between different types of auth failures
+//!
+//! ## Constant-Time Guarantees and Timing Side-Channels
+//! This implementation uses a **defense-in-depth** approach to timing side-channels:
+//!
+//! 1. **Cryptographic Layer** (constant-time, provided by `aes-gcm` crate):
+//!    - AES-GCM encryption and decryption operations
+//!    - Authentication tag verification using constant-time comparison
+//!    - These operations do not leak information about plaintext or key material
+//!
+//! 2. **Protocol Layer** (this module, may leak some timing):
+//!    - Length validation and bounds checking (happens before crypto)
+//!    - Record format validation
+//!    - These checks may introduce timing variations for obviously malformed records
+//!
+//! **Rationale**: Length checks fail-fast for performance and reject records that would
+//! fail authentication anyway. The critical security property—indistinguishability between
+//! decryption and authentication failures—is preserved by the constant-time crypto layer.
+//! An attacker cannot use timing to distinguish between "bad padding" and "bad MAC" because
+//! AES-GCM has no padding, and tag verification is constant-time.
+//!
+//! ## Key Management
+//! - Keys and IVs are zeroized on drop (via `ZeroizeOnDrop` trait)
+//! - Traffic keys should be rotated regularly (TLS 1.3 key update mechanism)
+//! - Never reuse keys across different connections
+//!
+//! ## Implementation Dependencies
+//! - **`aes-gcm` crate**: Provides the core AES-GCM implementation with constant-time
+//!   guarantees for encryption, decryption, and authentication tag operations
+//! - **`zeroize` crate**: Ensures sensitive key material is securely erased from memory
 
 use aes_gcm::{
     aead::{Aead, KeyInit, Payload},
@@ -90,13 +123,15 @@ pub const MAX_CIPHERTEXT_SIZE: usize = MAX_PLAINTEXT_SIZE + 256;
 /// using HKDF-Expand-Label (see RFC 8446 Section 7.3).
 ///
 /// # Security
-/// Implements `ZeroizeOnDrop` to securely erase key material when dropped.
+/// - Fields are private to prevent accidental exposure or misuse
+/// - Implements `ZeroizeOnDrop` to securely erase key material when dropped
+/// - No accessor methods provided - keys should only be used via `AeadCipher`
 #[derive(Clone, Zeroize, ZeroizeOnDrop)]
 pub struct TrafficKeys {
     /// AES-128 encryption key (16 bytes)
-    pub key: [u8; KEY_SIZE],
+    key: [u8; KEY_SIZE],
     /// Initialization vector / write IV (12 bytes)
-    pub iv: [u8; IV_SIZE],
+    iv: [u8; IV_SIZE],
 }
 
 impl TrafficKeys {
@@ -186,8 +221,8 @@ impl AeadCipher {
         nonce[IV_SIZE - 8..].copy_from_slice(&seq_bytes);
 
         // XOR with the write IV
-        for i in 0..IV_SIZE {
-            nonce[i] ^= self.iv[i];
+        for (nonce_byte, iv_byte) in nonce.iter_mut().zip(self.iv.iter()) {
+            *nonce_byte ^= iv_byte;
         }
 
         nonce
@@ -249,7 +284,7 @@ impl AeadCipher {
     ///
     /// # Returns
     /// * `Ok(Vec<u8>)` - Decrypted plaintext
-    /// * `Err(TlsError::DecryptionFailed)` - If decryption or authentication fails
+    /// * `Err(TlsError)` - If validation, decryption, or authentication fails
     ///
     /// # Side Effects
     /// Increments the internal sequence number after successful decryption.
@@ -257,9 +292,26 @@ impl AeadCipher {
     /// # Security Notes
     /// - Authentication tag verification MUST succeed before returning plaintext
     /// - Failed authentication indicates tampering and MUST terminate the connection
-    /// - Timing information should not leak whether decryption or auth failed
+    /// - **Constant-time guarantees**: This implementation relies on the `aes-gcm` crate
+    ///   for constant-time cryptographic operations (AES-GCM encryption/decryption and
+    ///   authentication tag verification). However, this layer performs length validation
+    ///   checks that may introduce timing side-channels for invalid inputs (e.g., records
+    ///   that are too short or too long). These checks occur before cryptographic processing
+    ///   and are considered acceptable as they reject malformed records that wouldn't pass
+    ///   authentication anyway. Once a record reaches the cryptographic layer, the underlying
+    ///   `aes-gcm` crate provides constant-time guarantees for decryption and authentication.
+    ///   
+    ///   **Defense strategy**: Distinguish between:
+    ///   1. Format validation (may leak timing): length checks, basic sanity checks
+    ///   2. Cryptographic operations (constant-time): decryption and tag verification
+    ///   
+    ///   This is a defense-in-depth approach where catastrophic failures (authentication
+    ///   failures) are protected by constant-time crypto, while benign format errors can
+    ///   fail fast for better performance.
     pub fn decrypt(&mut self, ciphertext: &[u8], aad: &[u8]) -> Result<Vec<u8>, TlsError> {
-        // Validate ciphertext size (must be at least TAG_SIZE bytes)
+        // Early validation: reject obviously invalid records before crypto operations
+        // Note: These checks may leak timing information, but only for malformed records
+        // that would fail authentication anyway. This is an acceptable trade-off.
         if ciphertext.len() < TAG_SIZE {
             return Err(TlsError::InvalidLength(ciphertext.len() as u16));
         }
@@ -279,12 +331,18 @@ impl AeadCipher {
         };
 
         // Decrypt and verify AEAD tag
+        // The aes-gcm crate provides constant-time guarantees for this operation.
+        // Both decryption and authentication tag verification are performed in
+        // constant time to prevent timing attacks that could distinguish between
+        // decryption failures and authentication failures.
         let plaintext = self
             .cipher
             .decrypt(nonce_ref, payload)
             .map_err(|_| TlsError::DecryptionFailed)?;
 
         // Increment sequence number for next record
+        // This happens after successful decryption, so no timing leak risk here
+        // (the expensive crypto operation dominates timing measurements)
         self.sequence_number = self
             .sequence_number
             .checked_add(1)
@@ -296,17 +354,36 @@ impl AeadCipher {
     /// Get the current sequence number
     ///
     /// Useful for debugging and testing. In production, sequence numbers
-    /// should be kept internal to the cipher.
+    /// Get the current sequence number
     pub fn sequence_number(&self) -> u64 {
         self.sequence_number
     }
 
-    /// Reset the sequence number to zero
+    /// Update the cipher with new traffic keys and reset sequence number
     ///
-    /// This should only be called when transitioning to a new traffic secret
-    /// (e.g., during key update). Never reset the sequence number while
-    /// continuing to use the same key.
-    pub fn reset_sequence_number(&mut self) {
+    /// This method provides a safe way to transition to new traffic keys
+    /// (e.g., during key update). The sequence number is automatically reset
+    /// to zero when new keys are installed, preventing nonce reuse with the old key.
+    ///
+    /// # Security
+    /// This is the ONLY safe way to reset the sequence number. Resetting the
+    /// sequence number while continuing to use the same key would violate
+    /// AES-GCM security guarantees and lead to catastrophic nonce reuse.
+    ///
+    /// # Arguments
+    /// * `keys` - New traffic keys to install
+    ///
+    /// # Example
+    /// ```ignore
+    /// // After key update in TLS 1.3
+    /// let new_keys = derive_traffic_keys(&new_secret);
+    /// cipher.update_keys(new_keys);
+    /// // Sequence number is now 0 with the new key
+    /// ```
+    pub fn update_keys(&mut self, keys: TrafficKeys) {
+        self.cipher = Aes128Gcm::new_from_slice(&keys.key)
+            .expect("Invalid key length for AES-128-GCM");
+        self.iv = keys.iv;
         self.sequence_number = 0;
     }
 }
@@ -348,7 +425,7 @@ pub fn encrypt_record(
     let mut inner_plaintext = Vec::with_capacity(content.len() + 1 + padding_len);
     inner_plaintext.extend_from_slice(content);
     inner_plaintext.push(content_type);
-    inner_plaintext.extend(std::iter::repeat(0u8).take(padding_len));
+    inner_plaintext.extend(std::iter::repeat_n(0u8, padding_len));
 
     // Encrypt
     cipher.encrypt(&inner_plaintext, aad)
@@ -383,6 +460,8 @@ pub fn decrypt_record(
     }
 
     // Find the content type by scanning backwards for the first non-zero byte
+    // Per RFC 8446 Section 5.2: TLSInnerPlaintext = content || ContentType || zeros[padding]
+    // The ContentType byte is always non-zero, serving as a delimiter between content and padding
     let mut content_type_pos = inner_plaintext.len() - 1;
     while content_type_pos > 0 && inner_plaintext[content_type_pos] == 0 {
         content_type_pos -= 1;
@@ -390,6 +469,12 @@ pub fn decrypt_record(
 
     // Extract content type
     let content_type = inner_plaintext[content_type_pos];
+
+    // Validate that content type is non-zero (RFC 8446: ContentType 0 is invalid)
+    // This ensures we found a valid delimiter and not just all zeros
+    if content_type == 0 {
+        return Err(TlsError::InvalidRecord);
+    }
 
     // Extract content (everything before content type and padding)
     let content = inner_plaintext[..content_type_pos].to_vec();
@@ -457,20 +542,22 @@ mod tests {
     /// Test basic encrypt/decrypt round-trip
     #[test]
     fn test_encrypt_decrypt_roundtrip() {
-        let keys = TrafficKeys::new([0x42u8; KEY_SIZE], [0x13u8; IV_SIZE]);
-        let mut cipher = AeadCipher::new(keys);
+        let key = [0x42u8; KEY_SIZE];
+        let iv = [0x13u8; IV_SIZE];
+        
+        // Use separate cipher instances for encryption and decryption
+        // to maintain proper sequence numbers
+        let mut encrypt_cipher = AeadCipher::new(TrafficKeys::new(key, iv));
+        let mut decrypt_cipher = AeadCipher::new(TrafficKeys::new(key, iv));
 
         let plaintext = b"Hello, TLS 1.3!";
         let aad = &[0x17, 0x03, 0x03, 0x00, 0x0f];
 
-        let ciphertext = cipher.encrypt(plaintext, aad).unwrap();
+        let ciphertext = encrypt_cipher.encrypt(plaintext, aad).unwrap();
         assert_ne!(ciphertext.as_slice(), plaintext);
         assert_eq!(ciphertext.len(), plaintext.len() + TAG_SIZE);
 
-        // Reset sequence number to decrypt
-        cipher.reset_sequence_number();
-
-        let decrypted = cipher.decrypt(&ciphertext, aad).unwrap();
+        let decrypted = decrypt_cipher.decrypt(&ciphertext, aad).unwrap();
         assert_eq!(decrypted, plaintext);
     }
 }

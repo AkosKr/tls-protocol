@@ -45,7 +45,7 @@ fn main() {
     println!("------------------------------------------------");
     
     let mut key_schedule = KeySchedule::new();
-    println!("Early Secret: {:?}", hex::encode(&key_schedule.current_secret()));
+    println!("Early Secret: {:?}", hex::encode(&key_schedule.current_secret_for_testing()));
     println!();
 
     // Step 3: Advance to Handshake Secret
@@ -53,7 +53,7 @@ fn main() {
     println!("-------------------------------------");
     
     key_schedule.advance_to_handshake_secret(&client_shared);
-    println!("Handshake Secret: {:?}", hex::encode(&key_schedule.current_secret()));
+    println!("Handshake Secret: {:?}", hex::encode(&key_schedule.current_secret_for_testing()));
     println!();
 
     // Step 4: Derive Handshake Traffic Secrets
@@ -81,7 +81,7 @@ fn main() {
     println!("----------------------------------");
     
     key_schedule.advance_to_master_secret();
-    println!("Master Secret: {:?}", hex::encode(&key_schedule.current_secret()));
+    println!("Master Secret: {:?}", hex::encode(&key_schedule.current_secret_for_testing()));
     println!();
 
     // Step 6: Derive Application Traffic Secrets

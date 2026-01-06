@@ -222,8 +222,24 @@ impl KeySchedule {
         self.stage
     }
 
-    /// Get the current secret (for testing purposes)
-    pub fn current_secret(&self) -> [u8; HASH_LEN] {
+    /// Get the current secret for testing purposes only
+    ///
+    /// # ⚠️ WARNING: Testing Only
+    ///
+    /// This method exposes the internal cryptographic secret and should
+    /// **ONLY** be used in tests. Do not call this method in production code.
+    ///
+    /// Exposing cryptographic secrets increases the risk of:
+    /// - Accidental logging of sensitive data
+    /// - Memory dumps containing secret material
+    /// - Timing attacks through debug interfaces
+    ///
+    /// # Safety
+    ///
+    /// While this method is marked `pub` to allow integration tests to access it,
+    /// it should never be used in production code paths.
+    #[doc(hidden)]
+    pub fn current_secret_for_testing(&self) -> [u8; HASH_LEN] {
         self.current_secret
     }
 
@@ -249,7 +265,7 @@ impl KeySchedule {
         );
 
         // Derive intermediate secret: Derive-Secret(Early Secret, "derived", "")
-        let empty_hash = Sha256::digest(&[]);
+        let empty_hash = Sha256::digest([]);
         let derived_secret = derive_secret(&self.current_secret, "derived", &empty_hash);
 
         // Extract with the shared secret
@@ -278,7 +294,7 @@ impl KeySchedule {
         );
 
         // Derive intermediate secret: Derive-Secret(Handshake Secret, "derived", "")
-        let empty_hash = Sha256::digest(&[]);
+        let empty_hash = Sha256::digest([]);
         let derived_secret = derive_secret(&self.current_secret, "derived", &empty_hash);
 
         // Extract with zero-filled IKM

@@ -33,18 +33,18 @@ fn test_aes_gcm_kat_1() {
     let plaintext = b"";
     let aad = b"";
 
-    let keys = TrafficKeys::new(key, iv);
-    let mut cipher = AeadCipher::new(keys);
+    // Use separate cipher instances for encryption and decryption
+    let mut encrypt_cipher = AeadCipher::new(TrafficKeys::new(key, iv));
+    let mut decrypt_cipher = AeadCipher::new(TrafficKeys::new(key, iv));
 
     // Encrypt
-    let ciphertext = cipher.encrypt(plaintext, aad).unwrap();
+    let ciphertext = encrypt_cipher.encrypt(plaintext, aad).unwrap();
     
     // Ciphertext should only be the tag for empty plaintext
     assert_eq!(ciphertext.len(), TAG_SIZE);
 
     // Decrypt
-    cipher.reset_sequence_number();
-    let decrypted = cipher.decrypt(&ciphertext, aad).unwrap();
+    let decrypted = decrypt_cipher.decrypt(&ciphertext, aad).unwrap();
     assert_eq!(decrypted, plaintext);
 }
 
@@ -62,17 +62,17 @@ fn test_aes_gcm_kat_2() {
     let plaintext = b"Hello, World!";
     let aad = b"additional data";
 
-    let keys = TrafficKeys::new(key, iv);
-    let mut cipher = AeadCipher::new(keys);
+    // Use separate cipher instances for encryption and decryption
+    let mut encrypt_cipher = AeadCipher::new(TrafficKeys::new(key, iv));
+    let mut decrypt_cipher = AeadCipher::new(TrafficKeys::new(key, iv));
 
     // Encrypt
-    let ciphertext = cipher.encrypt(plaintext, aad).unwrap();
+    let ciphertext = encrypt_cipher.encrypt(plaintext, aad).unwrap();
     assert_eq!(ciphertext.len(), plaintext.len() + TAG_SIZE);
     assert_ne!(&ciphertext[..plaintext.len()], plaintext);
 
     // Decrypt
-    cipher.reset_sequence_number();
-    let decrypted = cipher.decrypt(&ciphertext, aad).unwrap();
+    let decrypted = decrypt_cipher.decrypt(&ciphertext, aad).unwrap();
     assert_eq!(decrypted, plaintext);
 }
 
@@ -86,37 +86,41 @@ fn test_encrypt_decrypt_roundtrip_various_sizes() {
     let test_sizes = vec![0, 1, 15, 16, 17, 255, 256, 1024, 4096, 8192, MAX_PLAINTEXT_SIZE];
 
     for size in test_sizes {
-        let mut cipher = AeadCipher::new(keys.clone());
+        // Use separate cipher instances for each test
+        let mut encrypt_cipher = AeadCipher::new(keys.clone());
+        let mut decrypt_cipher = AeadCipher::new(keys.clone());
         
         // Create plaintext of specified size
         let plaintext: Vec<u8> = (0..size).map(|i| (i % 256) as u8).collect();
         let aad = &[0x17, 0x03, 0x03, (size >> 8) as u8, (size & 0xff) as u8];
 
         // Encrypt
-        let ciphertext = cipher.encrypt(&plaintext, aad).unwrap();
+        let ciphertext = encrypt_cipher.encrypt(&plaintext, aad).unwrap();
         assert_eq!(ciphertext.len(), plaintext.len() + TAG_SIZE);
 
         // Decrypt
-        cipher.reset_sequence_number();
-        let decrypted = cipher.decrypt(&ciphertext, aad).unwrap();
+        let decrypted = decrypt_cipher.decrypt(&ciphertext, aad).unwrap();
         assert_eq!(decrypted, plaintext, "Failed for size {}", size);
     }
 }
 
 #[test]
 fn test_max_record_size() {
-    let keys = TrafficKeys::new([0x55u8; KEY_SIZE], [0xAAu8; IV_SIZE]);
-    let mut cipher = AeadCipher::new(keys);
+    let key = [0x55u8; KEY_SIZE];
+    let iv = [0xAAu8; IV_SIZE];
+    
+    // Use separate cipher instances
+    let mut encrypt_cipher = AeadCipher::new(TrafficKeys::new(key, iv));
+    let mut decrypt_cipher = AeadCipher::new(TrafficKeys::new(key, iv));
 
     // Create maximum-sized plaintext (16KB)
     let plaintext = vec![0x42u8; MAX_PLAINTEXT_SIZE];
     let aad = &[0x17, 0x03, 0x03, 0x40, 0x00];
 
-    let ciphertext = cipher.encrypt(&plaintext, aad).unwrap();
+    let ciphertext = encrypt_cipher.encrypt(&plaintext, aad).unwrap();
     assert_eq!(ciphertext.len(), MAX_PLAINTEXT_SIZE + TAG_SIZE);
 
-    cipher.reset_sequence_number();
-    let decrypted = cipher.decrypt(&ciphertext, aad).unwrap();
+    let decrypted = decrypt_cipher.decrypt(&ciphertext, aad).unwrap();
     assert_eq!(decrypted, plaintext);
 }
 
@@ -135,56 +139,59 @@ fn test_record_too_large() {
 
 #[test]
 fn test_authentication_failure_wrong_tag() {
-    let keys = TrafficKeys::new([0x42u8; KEY_SIZE], [0x13u8; IV_SIZE]);
-    let mut cipher = AeadCipher::new(keys);
+    let key = [0x42u8; KEY_SIZE];
+    let iv = [0x13u8; IV_SIZE];
+    let mut encrypt_cipher = AeadCipher::new(TrafficKeys::new(key, iv));
+    let mut decrypt_cipher = AeadCipher::new(TrafficKeys::new(key, iv));
 
     let plaintext = b"Secret message";
     let aad = &[0x17, 0x03, 0x03, 0x00, 0x0e];
 
-    let mut ciphertext = cipher.encrypt(plaintext, aad).unwrap();
+    let mut ciphertext = encrypt_cipher.encrypt(plaintext, aad).unwrap();
     
     // Tamper with the authentication tag (last 16 bytes)
     let tag_start = ciphertext.len() - TAG_SIZE;
     ciphertext[tag_start] ^= 0xFF;
 
-    cipher.reset_sequence_number();
-    let result = cipher.decrypt(&ciphertext, aad);
+    let result = decrypt_cipher.decrypt(&ciphertext, aad);
     assert!(result.is_err(), "Should fail authentication with corrupted tag");
 }
 
 #[test]
 fn test_authentication_failure_wrong_ciphertext() {
-    let keys = TrafficKeys::new([0x42u8; KEY_SIZE], [0x13u8; IV_SIZE]);
-    let mut cipher = AeadCipher::new(keys);
+    let key = [0x42u8; KEY_SIZE];
+    let iv = [0x13u8; IV_SIZE];
+    let mut encrypt_cipher = AeadCipher::new(TrafficKeys::new(key, iv));
+    let mut decrypt_cipher = AeadCipher::new(TrafficKeys::new(key, iv));
 
     let plaintext = b"Secret message";
     let aad = &[0x17, 0x03, 0x03, 0x00, 0x0e];
 
-    let mut ciphertext = cipher.encrypt(plaintext, aad).unwrap();
+    let mut ciphertext = encrypt_cipher.encrypt(plaintext, aad).unwrap();
     
     // Tamper with the ciphertext (not the tag)
     ciphertext[0] ^= 0xFF;
 
-    cipher.reset_sequence_number();
-    let result = cipher.decrypt(&ciphertext, aad);
+    let result = decrypt_cipher.decrypt(&ciphertext, aad);
     assert!(result.is_err(), "Should fail authentication with corrupted ciphertext");
 }
 
 #[test]
 fn test_authentication_failure_wrong_aad() {
-    let keys = TrafficKeys::new([0x42u8; KEY_SIZE], [0x13u8; IV_SIZE]);
-    let mut cipher = AeadCipher::new(keys);
+    let key = [0x42u8; KEY_SIZE];
+    let iv = [0x13u8; IV_SIZE];
+    let mut encrypt_cipher = AeadCipher::new(TrafficKeys::new(key, iv));
+    let mut decrypt_cipher = AeadCipher::new(TrafficKeys::new(key, iv));
 
     let plaintext = b"Secret message";
     let aad = &[0x17, 0x03, 0x03, 0x00, 0x0e];
 
-    let ciphertext = cipher.encrypt(plaintext, aad).unwrap();
+    let ciphertext = encrypt_cipher.encrypt(plaintext, aad).unwrap();
     
     // Use different AAD for decryption
     let wrong_aad = &[0x17, 0x03, 0x03, 0x00, 0x0f];
 
-    cipher.reset_sequence_number();
-    let result = cipher.decrypt(&ciphertext, wrong_aad);
+    let result = decrypt_cipher.decrypt(&ciphertext, wrong_aad);
     assert!(result.is_err(), "Should fail authentication with wrong AAD");
 }
 
@@ -252,22 +259,23 @@ fn test_decrypt_requires_correct_sequence() {
 
 #[test]
 fn test_encrypt_record_with_content_type() {
-    let keys = TrafficKeys::new([0x42u8; KEY_SIZE], [0x13u8; IV_SIZE]);
-    let mut cipher = AeadCipher::new(keys);
+    let key = [0x42u8; KEY_SIZE];
+    let iv = [0x13u8; IV_SIZE];
+    let mut encrypt_cipher = AeadCipher::new(TrafficKeys::new(key, iv));
+    let mut decrypt_cipher = AeadCipher::new(TrafficKeys::new(key, iv));
 
     let content = b"Application data";
     let content_type = ContentType::ApplicationData as u8;
     let aad = &[0x17, 0x03, 0x03, 0x00, 0x11];
 
     // Encrypt with content type
-    let ciphertext = encrypt_record(&mut cipher, content, content_type, aad, 0).unwrap();
+    let ciphertext = encrypt_record(&mut encrypt_cipher, content, content_type, aad, 0).unwrap();
 
     // Should be: content + content_type (1 byte) + tag
     assert_eq!(ciphertext.len(), content.len() + 1 + TAG_SIZE);
 
     // Decrypt
-    cipher.reset_sequence_number();
-    let (decrypted_content, decrypted_type) = decrypt_record(&mut cipher, &ciphertext, aad).unwrap();
+    let (decrypted_content, decrypted_type) = decrypt_record(&mut decrypt_cipher, &ciphertext, aad).unwrap();
     
     assert_eq!(decrypted_content, content);
     assert_eq!(decrypted_type, content_type);
@@ -275,8 +283,10 @@ fn test_encrypt_record_with_content_type() {
 
 #[test]
 fn test_encrypt_record_with_padding() {
-    let keys = TrafficKeys::new([0x42u8; KEY_SIZE], [0x13u8; IV_SIZE]);
-    let mut cipher = AeadCipher::new(keys);
+    let key = [0x42u8; KEY_SIZE];
+    let iv = [0x13u8; IV_SIZE];
+    let mut encrypt_cipher = AeadCipher::new(TrafficKeys::new(key, iv));
+    let mut decrypt_cipher = AeadCipher::new(TrafficKeys::new(key, iv));
 
     let content = b"Short";
     let content_type = ContentType::ApplicationData as u8;
@@ -284,14 +294,13 @@ fn test_encrypt_record_with_padding() {
     let aad = &[0x17, 0x03, 0x03, 0x00, 0x10];
 
     // Encrypt with padding
-    let ciphertext = encrypt_record(&mut cipher, content, content_type, aad, padding_len).unwrap();
+    let ciphertext = encrypt_record(&mut encrypt_cipher, content, content_type, aad, padding_len).unwrap();
 
     // Should be: content + content_type + padding + tag
     assert_eq!(ciphertext.len(), content.len() + 1 + padding_len + TAG_SIZE);
 
     // Decrypt
-    cipher.reset_sequence_number();
-    let (decrypted_content, decrypted_type) = decrypt_record(&mut cipher, &ciphertext, aad).unwrap();
+    let (decrypted_content, decrypted_type) = decrypt_record(&mut decrypt_cipher, &ciphertext, aad).unwrap();
     
     assert_eq!(decrypted_content, content);
     assert_eq!(decrypted_type, content_type);
@@ -299,8 +308,10 @@ fn test_encrypt_record_with_padding() {
 
 #[test]
 fn test_decrypt_record_strips_padding() {
-    let keys = TrafficKeys::new([0x42u8; KEY_SIZE], [0x13u8; IV_SIZE]);
-    let mut cipher = AeadCipher::new(keys);
+    let key = [0x42u8; KEY_SIZE];
+    let iv = [0x13u8; IV_SIZE];
+    let mut encrypt_cipher = AeadCipher::new(TrafficKeys::new(key, iv));
+    let mut decrypt_cipher = AeadCipher::new(TrafficKeys::new(key, iv));
 
     let content = b"Test message";
     let content_type = ContentType::Handshake as u8;
@@ -308,11 +319,10 @@ fn test_decrypt_record_strips_padding() {
     let aad = &[0x16, 0x03, 0x03, 0x00, 0x71];
 
     // Encrypt with substantial padding
-    let ciphertext = encrypt_record(&mut cipher, content, content_type, aad, padding_len).unwrap();
+    let ciphertext = encrypt_record(&mut encrypt_cipher, content, content_type, aad, padding_len).unwrap();
 
     // Decrypt and verify padding is stripped
-    cipher.reset_sequence_number();
-    let (decrypted_content, decrypted_type) = decrypt_record(&mut cipher, &ciphertext, aad).unwrap();
+    let (decrypted_content, decrypted_type) = decrypt_record(&mut decrypt_cipher, &ciphertext, aad).unwrap();
     
     assert_eq!(decrypted_content, content);
     assert_eq!(decrypted_type, content_type);
@@ -321,33 +331,35 @@ fn test_decrypt_record_strips_padding() {
 
 #[test]
 fn test_edge_case_empty_payload() {
-    let keys = TrafficKeys::new([0x42u8; KEY_SIZE], [0x13u8; IV_SIZE]);
-    let mut cipher = AeadCipher::new(keys);
+    let key = [0x42u8; KEY_SIZE];
+    let iv = [0x13u8; IV_SIZE];
+    let mut encrypt_cipher = AeadCipher::new(TrafficKeys::new(key, iv));
+    let mut decrypt_cipher = AeadCipher::new(TrafficKeys::new(key, iv));
 
     let empty_plaintext = b"";
     let aad = &[0x17, 0x03, 0x03, 0x00, 0x00];
 
-    let ciphertext = cipher.encrypt(empty_plaintext, aad).unwrap();
+    let ciphertext = encrypt_cipher.encrypt(empty_plaintext, aad).unwrap();
     assert_eq!(ciphertext.len(), TAG_SIZE);
 
-    cipher.reset_sequence_number();
-    let decrypted = cipher.decrypt(&ciphertext, aad).unwrap();
+    let decrypted = decrypt_cipher.decrypt(&ciphertext, aad).unwrap();
     assert_eq!(decrypted, empty_plaintext);
 }
 
 #[test]
 fn test_edge_case_single_byte() {
-    let keys = TrafficKeys::new([0x42u8; KEY_SIZE], [0x13u8; IV_SIZE]);
-    let mut cipher = AeadCipher::new(keys);
+    let key = [0x42u8; KEY_SIZE];
+    let iv = [0x13u8; IV_SIZE];
+    let mut encrypt_cipher = AeadCipher::new(TrafficKeys::new(key, iv));
+    let mut decrypt_cipher = AeadCipher::new(TrafficKeys::new(key, iv));
 
     let single_byte = b"X";
     let aad = &[0x17, 0x03, 0x03, 0x00, 0x01];
 
-    let ciphertext = cipher.encrypt(single_byte, aad).unwrap();
+    let ciphertext = encrypt_cipher.encrypt(single_byte, aad).unwrap();
     assert_eq!(ciphertext.len(), 1 + TAG_SIZE);
 
-    cipher.reset_sequence_number();
-    let decrypted = cipher.decrypt(&ciphertext, aad).unwrap();
+    let decrypted = decrypt_cipher.decrypt(&ciphertext, aad).unwrap();
     assert_eq!(decrypted, single_byte);
 }
 
@@ -442,12 +454,9 @@ fn test_integration_application_traffic() {
 #[test]
 fn test_traffic_keys_zeroize() {
     // Verify TrafficKeys implements ZeroizeOnDrop
-    // This is a compile-time check more than a runtime test
+    // This is a compile-time check - if this compiles, ZeroizeOnDrop is working
     let keys = TrafficKeys::new([0x42u8; KEY_SIZE], [0x13u8; IV_SIZE]);
     drop(keys); // Keys should be zeroized on drop
-    
-    // If this compiles, ZeroizeOnDrop is working
-    assert!(true);
 }
 
 #[test]
@@ -523,8 +532,10 @@ fn test_wrong_sequence_number_fails() {
 
 #[test]
 fn test_tls_record_header_as_aad() {
-    let keys = TrafficKeys::new([0x42u8; KEY_SIZE], [0x13u8; IV_SIZE]);
-    let mut cipher = AeadCipher::new(keys);
+    let key = [0x42u8; KEY_SIZE];
+    let iv = [0x13u8; IV_SIZE];
+    let mut encrypt_cipher = AeadCipher::new(TrafficKeys::new(key, iv));
+    let mut decrypt_cipher = AeadCipher::new(TrafficKeys::new(key, iv));
 
     let plaintext = b"Test data";
     
@@ -539,9 +550,231 @@ fn test_tls_record_header_as_aad() {
     aad.extend_from_slice(&version.to_be_bytes());
     aad.extend_from_slice(&length.to_be_bytes());
 
-    let ciphertext = cipher.encrypt(plaintext, &aad).unwrap();
+    let ciphertext = encrypt_cipher.encrypt(plaintext, &aad).unwrap();
     
-    cipher.reset_sequence_number();
-    let decrypted = cipher.decrypt(&ciphertext, &aad).unwrap();
+    let decrypted = decrypt_cipher.decrypt(&ciphertext, &aad).unwrap();
     assert_eq!(decrypted, plaintext);
 }
+
+#[test]
+fn test_update_keys_resets_sequence_safely() {
+    // Test that update_keys() safely transitions to new keys and resets sequence
+    let old_key = [0x42u8; KEY_SIZE];
+    let old_iv = [0x13u8; IV_SIZE];
+    let mut cipher = AeadCipher::new(TrafficKeys::new(old_key, old_iv));
+
+    let plaintext = b"Message 1";
+    let aad = &[0x17, 0x03, 0x03, 0x00, 0x09];
+
+    // Encrypt a few messages with the old key
+    cipher.encrypt(plaintext, aad).unwrap();
+    cipher.encrypt(plaintext, aad).unwrap();
+    assert_eq!(cipher.sequence_number(), 2);
+
+    // Simulate key update (e.g., TLS 1.3 KeyUpdate)
+    let new_key = [0x99u8; KEY_SIZE];
+    let new_iv = [0xAAu8; IV_SIZE];
+    cipher.update_keys(TrafficKeys::new(new_key, new_iv));
+
+    // Sequence number should be reset to 0 with the new key
+    assert_eq!(cipher.sequence_number(), 0);
+
+    // Can now safely encrypt with the new key starting from sequence 0
+    let new_plaintext = b"Message after key update";
+    let new_aad = &[0x17, 0x03, 0x03, 0x00, 0x18];
+    let ciphertext = cipher.encrypt(new_plaintext, new_aad).unwrap();
+    
+    // Verify it encrypted successfully
+    assert_eq!(ciphertext.len(), new_plaintext.len() + TAG_SIZE);
+    assert_eq!(cipher.sequence_number(), 1);
+}
+
+#[test]
+fn test_update_keys_prevents_nonce_reuse() {
+    // Demonstrate that update_keys prevents nonce reuse by tying
+    // sequence number reset to key updates
+    let key1 = [0x11u8; KEY_SIZE];
+    let iv1 = [0x22u8; IV_SIZE];
+    let mut cipher = AeadCipher::new(TrafficKeys::new(key1, iv1));
+
+    let plaintext = b"Test message";
+    let aad = &[0x17, 0x03, 0x03, 0x00, 0x0c];
+
+    // Encrypt with sequence 0
+    let ct1 = cipher.encrypt(plaintext, aad).unwrap();
+    assert_eq!(cipher.sequence_number(), 1);
+
+    // Update to new keys - this is the ONLY safe way to reset sequence
+    let key2 = [0x33u8; KEY_SIZE];
+    let iv2 = [0x44u8; IV_SIZE];
+    cipher.update_keys(TrafficKeys::new(key2, iv2));
+    assert_eq!(cipher.sequence_number(), 0);
+
+    // Now we can safely encrypt again with sequence 0, but with different keys
+    let ct2 = cipher.encrypt(plaintext, aad).unwrap();
+    
+    // The ciphertexts should be different because they use different keys
+    // even though both used sequence number 0
+    assert_ne!(ct1, ct2, "Same sequence but different keys should produce different ciphertexts");
+}
+
+/// Test that content ending with zero bytes is correctly preserved
+/// This is a critical edge case: the RFC states padding consists of zero bytes,
+/// but legitimate content can also end with zeros. The content type byte (non-zero)
+/// serves as the delimiter between content and padding.
+#[test]
+fn test_content_ending_with_zeros() {
+    let key = [0x42u8; KEY_SIZE];
+    let iv = [0x13u8; IV_SIZE];
+    let mut encrypt_cipher = AeadCipher::new(TrafficKeys::new(key, iv));
+    let mut decrypt_cipher = AeadCipher::new(TrafficKeys::new(key, iv));
+
+    // Content that ends with multiple zero bytes (legitimate data)
+    let content = vec![0x01, 0x02, 0x03, 0x00, 0x00, 0x00];
+    let content_type = ContentType::ApplicationData as u8; // 0x17
+    let padding_len = 5; // Add some padding too
+    let aad = &[0x17, 0x03, 0x03, 0x00, 0x0c];
+
+    // Encrypt: content || content_type || padding
+    // Result: [0x01, 0x02, 0x03, 0x00, 0x00, 0x00, 0x17, 0x00, 0x00, 0x00, 0x00, 0x00]
+    let ciphertext = encrypt_record(&mut encrypt_cipher, &content, content_type, aad, padding_len).unwrap();
+
+    // Decrypt should correctly identify:
+    // - Content: [0x01, 0x02, 0x03, 0x00, 0x00, 0x00] (including trailing zeros)
+    // - ContentType: 0x17 (the delimiter)
+    // - Padding: stripped away
+    let (decrypted_content, decrypted_type) = decrypt_record(&mut decrypt_cipher, &ciphertext, aad).unwrap();
+    
+    assert_eq!(decrypted_content, content, "Content with trailing zeros should be preserved");
+    assert_eq!(decrypted_type, content_type);
+}
+
+/// Test that content consisting entirely of zeros is correctly handled
+#[test]
+fn test_content_all_zeros() {
+    let key = [0x42u8; KEY_SIZE];
+    let iv = [0x13u8; IV_SIZE];
+    let mut encrypt_cipher = AeadCipher::new(TrafficKeys::new(key, iv));
+    let mut decrypt_cipher = AeadCipher::new(TrafficKeys::new(key, iv));
+
+    // Content that is all zeros
+    let content = vec![0x00, 0x00, 0x00, 0x00];
+    let content_type = ContentType::ApplicationData as u8; // 0x17
+    let aad = &[0x17, 0x03, 0x03, 0x00, 0x05];
+
+    let ciphertext = encrypt_record(&mut encrypt_cipher, &content, content_type, aad, 0).unwrap();
+    let (decrypted_content, decrypted_type) = decrypt_record(&mut decrypt_cipher, &ciphertext, aad).unwrap();
+    
+    assert_eq!(decrypted_content, content, "All-zero content should be preserved");
+    assert_eq!(decrypted_type, content_type);
+}
+
+/// Test that content with zeros followed by padding is correctly handled
+#[test]
+fn test_content_zeros_with_padding() {
+    let key = [0x42u8; KEY_SIZE];
+    let iv = [0x13u8; IV_SIZE];
+    let mut encrypt_cipher = AeadCipher::new(TrafficKeys::new(key, iv));
+    let mut decrypt_cipher = AeadCipher::new(TrafficKeys::new(key, iv));
+
+    // Complex case: content ends with zeros AND we have padding
+    let content = vec![0xAA, 0xBB, 0x00, 0x00];
+    let content_type = ContentType::Handshake as u8; // 0x16
+    let padding_len = 10;
+    let aad = &[0x16, 0x03, 0x03, 0x00, 0x0f];
+
+    // Structure: [0xAA, 0xBB, 0x00, 0x00, 0x16, 0x00, 0x00, ...]
+    //             ^-- content --^  ^type^ ^-- padding --^
+    let ciphertext = encrypt_record(&mut encrypt_cipher, &content, content_type, aad, padding_len).unwrap();
+    let (decrypted_content, decrypted_type) = decrypt_record(&mut decrypt_cipher, &ciphertext, aad).unwrap();
+    
+    assert_eq!(decrypted_content, content, "Content zeros should not be confused with padding");
+    assert_eq!(decrypted_type, content_type);
+}
+
+/// Test that AAD length field matches actual encrypted record length
+/// This test verifies the critical security property that the length in the AAD
+/// must exactly match the length of the encrypted record being sent.
+#[test]
+fn test_aad_length_calculation_with_padding() {
+    let key = [0x42u8; KEY_SIZE];
+    let iv = [0x13u8; IV_SIZE];
+    
+    let content = b"Test message";
+    let content_type = ContentType::ApplicationData as u8;
+    
+    // Test with different padding lengths
+    for padding_len in [0, 1, 10, 100] {
+        let mut encrypt_cipher = AeadCipher::new(TrafficKeys::new(key, iv));
+        let mut decrypt_cipher = AeadCipher::new(TrafficKeys::new(key, iv));
+        
+        // Calculate the correct AAD length
+        // Encrypted record = AEAD_Encrypt(content || content_type || padding)
+        // Final ciphertext = inner_plaintext || authentication_tag
+        let inner_plaintext_len = content.len() + 1 + padding_len; // content + type + padding
+        let encrypted_record_len = inner_plaintext_len + TAG_SIZE; // + auth tag
+        
+        // Construct AAD with correct length
+        let aad = [
+            ContentType::ApplicationData as u8,
+            0x03, 0x03,
+            (encrypted_record_len >> 8) as u8,
+            (encrypted_record_len & 0xff) as u8,
+        ];
+        
+        // Encrypt
+        let ciphertext = encrypt_record(&mut encrypt_cipher, content, content_type, &aad, padding_len).unwrap();
+        
+        // Verify the ciphertext length matches what we put in the AAD
+        assert_eq!(
+            ciphertext.len(), encrypted_record_len,
+            "Ciphertext length should match AAD length field for padding_len={}",
+            padding_len
+        );
+        
+        // Verify decryption works
+        let (decrypted, dec_type) = decrypt_record(&mut decrypt_cipher, &ciphertext, &aad).unwrap();
+        assert_eq!(decrypted, content);
+        assert_eq!(dec_type, content_type);
+    }
+}
+
+/// Test that incorrect AAD length causes authentication failure
+#[test]
+fn test_incorrect_aad_length_fails() {
+    let key = [0x42u8; KEY_SIZE];
+    let iv = [0x13u8; IV_SIZE];
+    let mut encrypt_cipher = AeadCipher::new(TrafficKeys::new(key, iv));
+    let mut decrypt_cipher = AeadCipher::new(TrafficKeys::new(key, iv));
+    
+    let content = b"Test";
+    let content_type = ContentType::ApplicationData as u8;
+    let padding_len = 5;
+    
+    // Correct AAD
+    let inner_len = content.len() + 1 + padding_len;
+    let correct_len = inner_len + TAG_SIZE;
+    let correct_aad = [
+        ContentType::ApplicationData as u8,
+        0x03, 0x03,
+        (correct_len >> 8) as u8,
+        (correct_len & 0xff) as u8,
+    ];
+    
+    // Encrypt with correct AAD
+    let ciphertext = encrypt_record(&mut encrypt_cipher, content, content_type, &correct_aad, padding_len).unwrap();
+    
+    // Try to decrypt with incorrect AAD (wrong length)
+    let wrong_len = correct_len + 1;
+    let wrong_aad = [
+        ContentType::ApplicationData as u8,
+        0x03, 0x03,
+        (wrong_len >> 8) as u8,
+        (wrong_len & 0xff) as u8,
+    ];
+    
+    // Should fail authentication
+    let result = decrypt_cipher.decrypt(&ciphertext, &wrong_aad);
+    assert!(result.is_err(), "Decryption should fail with incorrect AAD length");
+}
+

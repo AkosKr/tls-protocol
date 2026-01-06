@@ -160,7 +160,7 @@ impl AeadCipher {
     pub fn encrypt(&mut self, plaintext: &[u8], aad: &[u8]) -> Result<Vec<u8>, TlsError>
     pub fn decrypt(&mut self, ciphertext: &[u8], aad: &[u8]) -> Result<Vec<u8>, TlsError>
     pub fn sequence_number(&self) -> u64
-    pub fn reset_sequence_number(&mut self)
+    pub fn update_keys(&mut self, keys: TrafficKeys)
 }
 ```
 
@@ -257,6 +257,39 @@ While the current implementation is complete and production-ready for AES-128-GC
    - Side-channel attack mitigations
    - FIPS compliance validation
 
+## Recent Improvements
+
+### Content Type Extraction Fix (January 2026)
+
+**Issue**: The `decrypt_record()` function needed to correctly handle edge cases where legitimate content ends with zero bytes.
+
+**Analysis**: 
+- Per RFC 8446 Section 5.2, TLSInnerPlaintext structure is: `content || ContentType || zeros[padding]`
+- The ContentType byte is always non-zero (valid types are 0x14-0x18), serving as a delimiter
+- The backward scanning algorithm was correct for most cases, but needed validation to handle malformed records
+
+**Fix Applied**:
+1. Added validation that the extracted ContentType is non-zero
+2. This prevents edge cases where scanning might fail on all-zero records or invalid content types
+3. Returns `TlsError::InvalidRecord` if ContentType is 0 (explicitly invalid per RFC)
+
+**Test Coverage**:
+- ✅ Content ending with multiple zero bytes (legitimate data)
+- ✅ Content consisting entirely of zeros
+- ✅ Content with trailing zeros AND padding
+- ✅ Verification that padding is correctly stripped without affecting content
+
+**Code Changes**:
+```rust
+// Validate that content type is non-zero (RFC 8446: ContentType 0 is invalid)
+// This ensures we found a valid delimiter and not just all zeros
+if content_type == 0 {
+    return Err(TlsError::InvalidRecord);
+}
+```
+
+This fix ensures robust handling of all edge cases while maintaining RFC compliance.
+
 ## Conclusion
 
 The AES-128-GCM authenticated encryption implementation is **complete, tested, and ready for use**. It provides:
@@ -267,5 +300,6 @@ The AES-128-GCM authenticated encryption implementation is **complete, tested, a
 - ✅ Comprehensive test coverage (100% pass rate)
 - ✅ Clear documentation and examples
 - ✅ Production-ready code quality
+- ✅ Correct handling of edge cases (content with trailing zeros)
 
 All originally specified requirements have been met and exceeded with additional security features and comprehensive testing.

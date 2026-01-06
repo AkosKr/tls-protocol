@@ -245,7 +245,8 @@ fn test_write_multiple_records() {
 
 #[test]
 fn test_connect_invalid_address() {
-    // Try to connect to an address that doesn't exist (TEST-NET-1 is non-routable)
-    let result = TlsStream::connect("192.0.2.1:9");
+    // Try to connect to localhost on a port where nothing is listening
+    // This should fail quickly with "connection refused" instead of timing out
+    let result = TlsStream::connect("127.0.0.1:1");
     assert!(result.is_err(), "Should fail to connect to non-existent server");
 }
