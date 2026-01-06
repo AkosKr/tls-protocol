@@ -405,7 +405,7 @@ fn test_edge_case_zero_length_transcript() {
     ks.advance_to_handshake_secret(&shared_secret);
     
     // Empty transcript hash
-    let empty_hash = Sha256::digest([]);
+    let empty_hash = Sha256::digest(&[]);
     
     let client_secret = ks.derive_client_handshake_traffic_secret(&empty_hash);
     let server_secret = ks.derive_server_handshake_traffic_secret(&empty_hash);
