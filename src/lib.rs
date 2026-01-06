@@ -11,7 +11,6 @@ pub mod parser;
 pub mod server_hello;
 pub mod tls_stream;
 pub mod x25519_key_exchange;
-pub mod key_schedule;
 
 // Re-export commonly used types
 pub use aead::{AeadCipher, TrafficKeys, encrypt_record, decrypt_record};
@@ -23,7 +22,6 @@ pub use key_schedule::{KeySchedule, derive_traffic_keys};
 pub use parser::parse_header;
 pub use server_hello::ServerHello;
 pub use x25519_key_exchange::{X25519KeyPair, compute_shared_secret, parse_key_share_entry};
-pub use key_schedule::KeySchedule;
 
 /// Maximum allowed length for a TLS record payload in bytes.
 /// 
