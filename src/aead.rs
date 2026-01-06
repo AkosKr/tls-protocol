@@ -353,7 +353,12 @@ impl AeadCipher {
 
     /// Get the current sequence number
     ///
-    /// Useful for debugging and testing. In production, sequence numbers
+    /// Useful for debugging and testing. In production, sequence numbers should
+    /// generally be treated as internal state: avoid exposing them across API
+    /// boundaries or modifying them directly. They may be logged or monitored
+    /// to detect anomalies (e.g., unexpected resets, gaps, or approaching the
+    /// `u64` limit that would cause `TlsError::SequenceNumberOverflow`), but
+    /// application logic should not depend on specific sequence number values.
     pub fn sequence_number(&self) -> u64 {
         self.sequence_number
     }
