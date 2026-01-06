@@ -273,6 +273,99 @@ This project implements core components of the TLS 1.3 protocol as specified in 
 
 **Files**: [src/x25519_key_exchange.rs](src/x25519_key_exchange.rs), [tests/x25519_key_exchange_tests.rs](tests/x25519_key_exchange_tests.rs), [src/error.rs](src/error.rs)
 
+### Issue #15: Transcript Hash Manager (SHA-256) ✅
+**Goal**: Implement logic to maintain the running hash of all handshake messages (transcript hash), using SHA-256, as specified in RFC 8446 Section 4.4.1.
+
+**Implementation**:
+- **TranscriptHash Struct - SHA-256 Transcript Manager**:
+  - Maintains running SHA-256 hash of all handshake messages
+  - Used for key derivation, Finished messages, CertificateVerify, and session resumption
+  - Thread-safe cloning for forking hash state at different handshake stages
+
+- **Core Methods**:
+  - `new()` - Initialize empty transcript hash
+  - `update(&mut self, data: &[u8])` - Feed handshake message bytes incrementally
+  - `current_hash(&self) -> [u8; 32]` - Get current hash value (non-consuming)
+  - `finalize(self) -> [u8; 32]` - Get final hash value (consuming)
+  - `clone(&self) -> Self` - Fork/snapshot current hash state for parallel derivations
+  - `reset(&mut self)` - Clear and restart for session resumption scenarios
+
+- **Convenience Methods**:
+  - `update_client_hello(&mut self, &ClientHello)` - Add serialized ClientHello
+  - `update_server_hello(&mut self, &ServerHello)` - Add serialized ServerHello
+  - `empty_hash() -> [u8; 32]` - Static method for SHA-256 of empty input
+
+- **Hash State Management**:
+  - Non-consuming `current_hash()` allows continued updates after reading
+  - `clone()` creates independent fork for different key derivation points
+  - Multiple forks can branch from same transcript state
+  - Reset functionality for session resumption and connection reuse
+
+- **TLS 1.3 Integration Points**:
+  - **Key Schedule** - Provides transcript hash input to HKDF for deriving traffic secrets
+  - **Finished Message** - HMAC over transcript hash for handshake authentication
+  - **CertificateVerify** - Server signs transcript hash to prove certificate possession
+  - **Session Resumption** - PSK binder calculation uses transcript hash
+
+**Usage in TLS 1.3 Handshake**:
+```rust
+use tls_protocol::{TranscriptHash, ClientHello, ServerHello, KeySchedule};
+
+// Initialize transcript
+let mut transcript = TranscriptHash::new();
+
+// Update with ClientHello
+let client_hello = ClientHello::default_tls13([0u8; 32], vec![0xaa; 32]);
+transcript.update_client_hello(&client_hello);
+
+// Update with ServerHello
+let server_hello = ServerHello::new(/* ... */);
+transcript.update_server_hello(&server_hello);
+
+// Fork for handshake traffic secrets
+let handshake_transcript = transcript.clone();
+let handshake_hash = handshake_transcript.current_hash();
+
+// Use with KeySchedule for handshake key derivation
+let mut key_schedule = KeySchedule::new();
+key_schedule.advance_to_handshake_secret(&shared_secret);
+let client_hs_traffic = key_schedule
+    .derive_client_handshake_traffic_secret(&handshake_hash);
+
+// Continue with more messages for application traffic secrets
+transcript.update(b"EncryptedExtensions");
+transcript.update(b"Certificate");
+transcript.update(b"CertificateVerify");
+transcript.update(b"Finished");
+
+let application_hash = transcript.current_hash();
+key_schedule.advance_to_master_secret();
+let client_app_traffic = key_schedule
+    .derive_client_application_traffic_secret(&application_hash);
+```
+
+**Key Design Features**:
+- **Incremental Hashing** - Updates processed immediately without internal buffering
+- **Fork-Friendly** - Clone creates independent copy for branching derivations
+- **Type-Safe** - 32-byte arrays for SHA-256 outputs, preventing size errors
+- **Zero-Copy** - Non-consuming reads allow continued updates
+- **Session Reuse** - Reset method enables connection/session resumption
+
+**Testing** (Issue #15 requirements):
+- Empty hash calculation and static empty_hash() method
+- Single and multiple message updates
+- Incremental vs one-shot hashing equivalence (must match)
+- Hash forking/cloning for independent progressions
+- Multiple forks from same state remain independent
+- State management (current_hash non-consuming, finalize consuming, reset)
+- Integration with ClientHello and ServerHello messages
+- Full TLS 1.3 handshake sequence simulation
+- Real-world message serialization tests
+- RFC 8446 compliance verification
+- Known SHA-256 test vectors
+
+**Files**: [src/transcript_hash.rs](src/transcript_hash.rs), [tests/transcript_hash_tests.rs](tests/transcript_hash_tests.rs)
+
 ### Issue #13: HKDF-based Key Derivation Pipeline ✅
 **Goal**: Implement complete TLS 1.3 key schedule using HKDF (RFC 5869) with SHA-256, following RFC 8446 Sections 7.1 and 7.2.
 
@@ -345,6 +438,7 @@ tls-protocol/
 │   ├── client_hello.rs     # ClientHello message implementation
 │   ├── server_hello.rs     # ServerHello message parser
 │   ├── x25519_key_exchange.rs # X25519 key exchange implementation
+│   ├── transcript_hash.rs  # Transcript hash manager (SHA-256)
 │   └── key_schedule.rs     # HKDF-based key derivation pipeline
 ├── tests/
 │   ├── parser_tests.rs     # Parser validation tests
@@ -353,6 +447,7 @@ tls-protocol/
 │   ├── client_hello_tests.rs # ClientHello tests
 │   ├── server_hello_tests.rs # ServerHello parser tests
 │   ├── x25519_key_exchange_tests.rs # X25519 key exchange tests
+│   ├── transcript_hash_tests.rs # Transcript hash tests
 │   └── key_schedule_tests.rs # HKDF and key schedule tests
 ├── examples/
 │   ├── client.rs           # Example TLS client
@@ -477,26 +572,71 @@ assert_eq!(client_shared, server_shared);
 // Use shared_secret for HKDF in key schedule (RFC 8446, Section 7.1)
 ```
 
+### Transcript Hash Management
+
+```rust
+use tls_protocol::{TranscriptHash, ClientHello, ServerHello};
+use tls_protocol::extensions::{Extension, KeyShareEntry, TLS_VERSION_1_3, NAMED_GROUP_X25519};
+
+// Create a new transcript hash
+let mut transcript = TranscriptHash::new();
+
+// Update with ClientHello
+let client_hello = ClientHello::default_tls13([0u8; 32], vec![0xaa; 32]);
+transcript.update_client_hello(&client_hello);
+
+// Update with ServerHello
+let server_hello = ServerHello::new(
+    [0x88u8; 32],
+    vec![],
+    0x1301,
+    vec![
+        Extension::SupportedVersions(vec![TLS_VERSION_1_3]),
+        Extension::KeyShare(vec![KeyShareEntry::new(NAMED_GROUP_X25519, vec![0xbb; 32])]),
+    ],
+);
+transcript.update_server_hello(&server_hello);
+
+// Get current hash value (non-consuming)
+let hash_after_server_hello = transcript.current_hash();
+
+// Fork the transcript for different key derivations
+let handshake_transcript = transcript.clone();
+let handshake_hash = handshake_transcript.current_hash();
+
+// Continue with more messages
+transcript.update(b"EncryptedExtensions");
+transcript.update(b"Certificate");
+transcript.update(b"Finished");
+
+// Get final hash
+let final_hash = transcript.current_hash();
+```
+
 ### TLS 1.3 Key Schedule with HKDF
 
 ```rust
-use tls_protocol::key_schedule::KeySchedule;
-use sha2::{Digest, Sha256};
+use tls_protocol::{KeySchedule, TranscriptHash, ClientHello, ServerHello};
 
 // Step 1: Initialize key schedule (Early Secret stage)
 let mut key_schedule = KeySchedule::new();
 
-// Step 2: After ECDHE, advance to Handshake Secret
+// Step 2: Build transcript hash with handshake messages
+let mut transcript = TranscriptHash::new();
+let client_hello = ClientHello::default_tls13([0u8; 32], vec![0xaa; 32]);
+transcript.update_client_hello(&client_hello);
+
+let server_hello = ServerHello::new(/* ... */);
+transcript.update_server_hello(&server_hello);
+
+// Step 3: After ECDHE, advance to Handshake Secret
 // shared_secret comes from X25519KeyPair::compute_shared_secret()
 let shared_secret = [0xAAu8; 32]; // 32-byte output from X25519
 key_schedule.advance_to_handshake_secret(&shared_secret);
 
-// Step 3: Derive handshake traffic secrets for encryption
+// Step 4: Derive handshake traffic secrets for encryption
 // Transcript hash includes ClientHello...ServerHello
-let mut transcript = Sha256::new();
-transcript.update(b"ClientHello_bytes");
-transcript.update(b"ServerHello_bytes");
-let transcript_hash = transcript.finalize();
+let transcript_hash = transcript.current_hash();
 
 let client_hs_traffic = key_schedule
     .derive_client_handshake_traffic_secret(&transcript_hash);
@@ -505,16 +645,17 @@ let server_hs_traffic = key_schedule
 
 // Use these secrets to derive handshake encryption keys...
 
-// Step 4: After handshake completes, advance to Master Secret
+// Step 5: After handshake completes, advance to Master Secret
 key_schedule.advance_to_master_secret();
 
-// Step 5: Derive application traffic secrets for protected data
-// Transcript now includes up to server Finished
-let mut app_transcript = Sha256::new();
-app_transcript.update(b"ClientHello_bytes");
-app_transcript.update(b"ServerHello_bytes");
-app_transcript.update(b"ServerFinished_bytes");
-let app_transcript_hash = app_transcript.finalize();
+// Step 6: Continue updating transcript with more messages
+transcript.update(b"EncryptedExtensions");
+transcript.update(b"Certificate");
+transcript.update(b"CertificateVerify");
+transcript.update(b"Finished");
+
+// Step 7: Derive application traffic secrets for protected data
+let app_transcript_hash = transcript.current_hash();
 
 let client_app_traffic = key_schedule
     .derive_client_application_traffic_secret(&app_transcript_hash);
