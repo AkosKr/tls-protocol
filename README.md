@@ -581,7 +581,9 @@ let server_hello = ServerHello::new(
 
 // Send ServerHello and update transcript
 transcript.update(&server_hello.to_bytes());
-let handshake_transcript = transcript.finalize_reset();
+
+// Clone the transcript before finalizing so we can keep updating the original.
+let handshake_transcript = transcript.clone().finalize();
 
 // 7. Initialize key schedule and derive handshake keys
 let mut key_schedule = KeySchedule::new();
