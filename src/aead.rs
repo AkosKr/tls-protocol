@@ -354,7 +354,6 @@ impl AeadCipher {
     /// Get the current sequence number
     ///
     /// Useful for debugging and testing. In production, sequence numbers
-    /// Get the current sequence number
     pub fn sequence_number(&self) -> u64 {
         self.sequence_number
     }
