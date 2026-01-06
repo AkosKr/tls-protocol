@@ -53,7 +53,11 @@
 use hkdf::Hkdf;
 use sha2::{Digest, Sha256};
 
+use crate::aead::TrafficKeys;
+
 const HASH_LEN: usize = 32; // SHA-256 output size
+const KEY_LEN: usize = 16; // AES-128 key size
+const IV_LEN: usize = 12; // AES-GCM IV size
 
 /// HKDF-Extract as defined in RFC 5869, Section 2.2
 ///
@@ -440,4 +444,44 @@ impl Default for KeySchedule {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// Derive traffic keys (key and IV) from a traffic secret
+///
+/// As specified in RFC 8446 Section 7.3:
+/// ```text
+/// [sender]_write_key = HKDF-Expand-Label(Secret, "key", "", key_length)
+/// [sender]_write_iv  = HKDF-Expand-Label(Secret, "iv", "", iv_length)
+/// ```
+///
+/// For AES-128-GCM:
+/// - key_length = 16 bytes (128 bits)
+/// - iv_length = 12 bytes (96 bits)
+///
+/// # Arguments
+/// * `traffic_secret` - The handshake or application traffic secret
+///
+/// # Returns
+/// `TrafficKeys` containing the derived key and IV
+///
+/// # Example
+/// ```ignore
+/// let mut key_schedule = KeySchedule::new();
+/// key_schedule.advance_to_handshake_secret(&shared_secret);
+/// let transcript_hash = compute_transcript_hash(&messages);
+/// let server_secret = key_schedule.derive_server_handshake_traffic_secret(&transcript_hash);
+/// let server_keys = derive_traffic_keys(&server_secret);
+/// ```
+pub fn derive_traffic_keys(traffic_secret: &[u8]) -> TrafficKeys {
+    // Derive write key: HKDF-Expand-Label(Secret, "key", "", 16)
+    let key_bytes = hkdf_expand_label(traffic_secret, "key", &[], KEY_LEN);
+    let mut key = [0u8; KEY_LEN];
+    key.copy_from_slice(&key_bytes);
+
+    // Derive write IV: HKDF-Expand-Label(Secret, "iv", "", 12)
+    let iv_bytes = hkdf_expand_label(traffic_secret, "iv", &[], IV_LEN);
+    let mut iv = [0u8; IV_LEN];
+    iv.copy_from_slice(&iv_bytes);
+
+    TrafficKeys::new(key, iv)
 }

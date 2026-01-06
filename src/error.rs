@@ -49,6 +49,16 @@ pub enum TlsError {
     /// Key exchange failed
     /// Carries a description of the error.
     KeyExchangeFailed(String),
+    /// Encryption operation failed
+    EncryptionFailed,
+    /// Decryption operation failed (may indicate tampering)
+    DecryptionFailed,
+    /// Sequence number overflow (2^64-1 records encrypted)
+    SequenceNumberOverflow,
+    /// Record size exceeds maximum allowed
+    RecordTooLarge,
+    /// Invalid record format
+    InvalidRecord,
 }
 
 impl fmt::Display for TlsError {
@@ -99,6 +109,21 @@ impl fmt::Display for TlsError {
             }
             TlsError::KeyExchangeFailed(desc) => {
                 write!(f, "Key exchange failed: {desc}")
+            }
+            TlsError::EncryptionFailed => {
+                write!(f, "Encryption operation failed")
+            }
+            TlsError::DecryptionFailed => {
+                write!(f, "Decryption operation failed (authentication tag verification failed)")
+            }
+            TlsError::SequenceNumberOverflow => {
+                write!(f, "Sequence number overflow: maximum records encrypted with this key")
+            }
+            TlsError::RecordTooLarge => {
+                write!(f, "Record size exceeds maximum allowed")
+            }
+            TlsError::InvalidRecord => {
+                write!(f, "Invalid record format")
             }
         }
     }
