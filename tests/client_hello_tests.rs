@@ -305,7 +305,10 @@ fn test_client_hello_extensions_serialization() {
     assert!(ext_length > 0, "Extensions should be present");
     
     // Total message length should match
-    assert_eq!(bytes.len(), 4 + 2 + 32 + 1 + 0 + 2 + 6 + 1 + 1 + 2 + ext_length);
+    // 4 (header) + 2 (version) + 32 (random) + 1 (session_id_len) +
+    // 2 (cipher_suites_len) + 6 (cipher_suites) + 1 (compression_len) + 1 (compression) +
+    // 2 (extensions_len) + ext_length
+    assert_eq!(bytes.len(), 49 + 2 + ext_length);
 }
 
 #[test]

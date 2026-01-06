@@ -162,7 +162,7 @@ fn test_key_schedule_initialization() {
     let zero_ikm = [0u8; 32];
     let expected_early = hkdf_extract(Some(&zero_salt), &zero_ikm);
     
-    assert_eq!(ks.current_secret(), expected_early);
+    assert_eq!(ks.current_secret_for_testing(), expected_early);
 }
 
 #[test]
@@ -175,13 +175,13 @@ fn test_key_schedule_with_psk() {
     
     // Should be different from default (no PSK) early secret
     let ks_default = KeySchedule::new();
-    assert_ne!(ks.current_secret(), ks_default.current_secret());
+    assert_ne!(ks.current_secret_for_testing(), ks_default.current_secret_for_testing());
 }
 
 #[test]
 fn test_advance_to_handshake_secret() {
     let mut ks = KeySchedule::new();
-    let initial_secret = ks.current_secret();
+    let initial_secret = ks.current_secret_for_testing();
     
     // Simulate ECDHE shared secret (32 bytes from X25519)
     let shared_secret = [0x42u8; 32];
@@ -192,7 +192,7 @@ fn test_advance_to_handshake_secret() {
     assert_eq!(ks.stage(), KeyScheduleStage::Handshake);
     
     // Secret should have changed
-    assert_ne!(ks.current_secret(), initial_secret);
+    assert_ne!(ks.current_secret_for_testing(), initial_secret);
 }
 
 #[test]
@@ -201,7 +201,7 @@ fn test_advance_to_master_secret() {
     let shared_secret = [0x42u8; 32];
     
     ks.advance_to_handshake_secret(&shared_secret);
-    let handshake_secret = ks.current_secret();
+    let handshake_secret = ks.current_secret_for_testing();
     
     ks.advance_to_master_secret();
     
@@ -209,7 +209,7 @@ fn test_advance_to_master_secret() {
     assert_eq!(ks.stage(), KeyScheduleStage::Master);
     
     // Secret should have changed
-    assert_ne!(ks.current_secret(), handshake_secret);
+    assert_ne!(ks.current_secret_for_testing(), handshake_secret);
 }
 
 #[test]
@@ -219,19 +219,19 @@ fn test_full_key_schedule_progression() {
     
     // Stage 1: Early Secret
     assert_eq!(ks.stage(), KeyScheduleStage::Early);
-    let early_secret = ks.current_secret();
+    let early_secret = ks.current_secret_for_testing();
     
     // Stage 2: Handshake Secret
     let shared_secret = [0xAAu8; 32];
     ks.advance_to_handshake_secret(&shared_secret);
     assert_eq!(ks.stage(), KeyScheduleStage::Handshake);
-    let handshake_secret = ks.current_secret();
+    let handshake_secret = ks.current_secret_for_testing();
     assert_ne!(handshake_secret, early_secret);
     
     // Stage 3: Master Secret
     ks.advance_to_master_secret();
     assert_eq!(ks.stage(), KeyScheduleStage::Master);
-    let master_secret = ks.current_secret();
+    let master_secret = ks.current_secret_for_testing();
     assert_ne!(master_secret, handshake_secret);
     assert_ne!(master_secret, early_secret);
 }
@@ -260,8 +260,8 @@ fn test_derive_handshake_traffic_secrets() {
     assert_ne!(client_hs_secret, server_hs_secret);
     
     // Should be different from the handshake secret itself
-    assert_ne!(client_hs_secret, ks.current_secret());
-    assert_ne!(server_hs_secret, ks.current_secret());
+    assert_ne!(client_hs_secret, ks.current_secret_for_testing());
+    assert_ne!(server_hs_secret, ks.current_secret_for_testing());
 }
 
 #[test]
@@ -290,8 +290,8 @@ fn test_derive_application_traffic_secrets() {
     assert_ne!(client_app_secret, server_app_secret);
     
     // Should be different from the master secret itself
-    assert_ne!(client_app_secret, ks.current_secret());
-    assert_ne!(server_app_secret, ks.current_secret());
+    assert_ne!(client_app_secret, ks.current_secret_for_testing());
+    assert_ne!(server_app_secret, ks.current_secret_for_testing());
 }
 
 #[test]
@@ -305,7 +305,7 @@ fn test_derive_exporter_master_secret() {
     let exporter_secret = ks.derive_exporter_master_secret(&transcript_hash);
     
     assert_eq!(exporter_secret.len(), 32);
-    assert_ne!(exporter_secret, ks.current_secret());
+    assert_ne!(exporter_secret, ks.current_secret_for_testing());
 }
 
 #[test]
@@ -319,7 +319,7 @@ fn test_derive_resumption_master_secret() {
     let resumption_secret = ks.derive_resumption_master_secret(&transcript_hash);
     
     assert_eq!(resumption_secret.len(), 32);
-    assert_ne!(resumption_secret, ks.current_secret());
+    assert_ne!(resumption_secret, ks.current_secret_for_testing());
 }
 
 #[test]
@@ -334,7 +334,7 @@ fn test_different_shared_secrets_produce_different_keys() {
     ks1.advance_to_handshake_secret(&shared_secret_1);
     ks2.advance_to_handshake_secret(&shared_secret_2);
     
-    assert_ne!(ks1.current_secret(), ks2.current_secret());
+    assert_ne!(ks1.current_secret_for_testing(), ks2.current_secret_for_testing());
 }
 
 #[test]
@@ -510,7 +510,7 @@ fn test_hkdf_with_various_shared_secret_lengths() {
         ks.advance_to_handshake_secret(&shared_secret);
         
         // Should always produce a valid handshake secret
-        assert_eq!(ks.current_secret().len(), 32);
+        assert_eq!(ks.current_secret_for_testing().len(), 32);
         assert_eq!(ks.stage(), KeyScheduleStage::Handshake);
     }
 }
@@ -521,6 +521,6 @@ fn test_key_schedule_default_trait() {
     let ks1 = KeySchedule::default();
     let ks2 = KeySchedule::new();
     
-    assert_eq!(ks1.current_secret(), ks2.current_secret());
+    assert_eq!(ks1.current_secret_for_testing(), ks2.current_secret_for_testing());
     assert_eq!(ks1.stage(), ks2.stage());
 }

@@ -348,7 +348,7 @@ impl Extension {
                 }
 
                 let algos_length = u16::from_be_bytes([extension_data[0], extension_data[1]]) as usize;
-                if algos_length % 2 != 0 {
+                if !algos_length.is_multiple_of(2) {
                     return Err(TlsError::InvalidExtensionData(
                         "SignatureAlgorithms length must be even".to_string(),
                     ));
@@ -377,7 +377,7 @@ impl Extension {
                 }
 
                 let versions_length = extension_data[0] as usize;
-                if versions_length % 2 != 0 {
+                if !versions_length.is_multiple_of(2) {
                     return Err(TlsError::InvalidExtensionData(
                         "SupportedVersions length must be even".to_string(),
                     ));

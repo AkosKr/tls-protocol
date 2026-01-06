@@ -12,9 +12,23 @@ fn test_write_record_handshake() {
     
     let server_handle = thread::spawn(move || {
         let (mut stream, _) = listener.accept().expect("Failed to accept connection");
+        stream.set_read_timeout(Some(Duration::from_secs(5))).expect("Failed to set timeout");
         let mut buffer = vec![0u8; 1024];
-        let n = stream.read(&mut buffer).expect("Failed to read from stream");
-        buffer.truncate(n);
+        let mut total_read = 0;
+        let expected_bytes = 17; // 5 byte header + 12 byte payload
+        
+        // Read until we get all the data
+        loop {
+            match stream.read(&mut buffer[total_read..]) {
+                Ok(0) => break,
+                Ok(n) => total_read += n,
+                Err(e) => panic!("Failed to read from stream: {}", e),
+            }
+            if total_read >= expected_bytes {
+                break;
+            }
+        }
+        buffer.truncate(total_read);
         buffer
     });
     
@@ -54,9 +68,23 @@ fn test_write_record_application_data() {
     
     let server_handle = thread::spawn(move || {
         let (mut stream, _) = listener.accept().expect("Failed to accept connection");
+        stream.set_read_timeout(Some(Duration::from_secs(5))).expect("Failed to set timeout");
         let mut buffer = vec![0u8; 1024];
-        let n = stream.read(&mut buffer).expect("Failed to read from stream");
-        buffer.truncate(n);
+        let mut total_read = 0;
+        let expected_bytes = 26; // 5 byte header + 21 byte payload
+        
+        // Read until we get all the data
+        loop {
+            match stream.read(&mut buffer[total_read..]) {
+                Ok(0) => break,
+                Ok(n) => total_read += n,
+                Err(e) => panic!("Failed to read from stream: {}", e),
+            }
+            if total_read >= expected_bytes {
+                break;
+            }
+        }
+        buffer.truncate(total_read);
         buffer
     });
     
@@ -123,9 +151,23 @@ fn test_write_record_empty_payload() {
     
     let server_handle = thread::spawn(move || {
         let (mut stream, _) = listener.accept().expect("Failed to accept connection");
+        stream.set_read_timeout(Some(Duration::from_secs(5))).expect("Failed to set timeout");
         let mut buffer = vec![0u8; 1024];
-        let n = stream.read(&mut buffer).expect("Failed to read from stream");
-        buffer.truncate(n);
+        let mut total_read = 0;
+        let expected_bytes = 5; // 5 byte header only
+        
+        // Read until we get all the data
+        loop {
+            match stream.read(&mut buffer[total_read..]) {
+                Ok(0) => break,
+                Ok(n) => total_read += n,
+                Err(e) => panic!("Failed to read from stream: {}", e),
+            }
+            if total_read >= expected_bytes {
+                break;
+            }
+        }
+        buffer.truncate(total_read);
         buffer
     });
     
@@ -245,7 +287,8 @@ fn test_write_multiple_records() {
 
 #[test]
 fn test_connect_invalid_address() {
-    // Try to connect to an address that doesn't exist (TEST-NET-1 is non-routable)
-    let result = TlsStream::connect("192.0.2.1:9");
+    // Try to connect to localhost on a port where nothing is listening
+    // This should fail quickly with "connection refused" instead of timing out
+    let result = TlsStream::connect("127.0.0.1:1");
     assert!(result.is_err(), "Should fail to connect to non-existent server");
 }

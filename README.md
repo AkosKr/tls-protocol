@@ -581,6 +581,7 @@ let server_hello = ServerHello::new(
 
 // Send ServerHello and update transcript
 transcript.update(&server_hello.to_bytes());
+
 // Clone the transcript before finalizing so we can keep updating the original.
 let handshake_transcript = transcript.clone().finalize();
 
