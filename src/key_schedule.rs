@@ -51,7 +51,8 @@
 //! ```
 
 use hkdf::Hkdf;
-use sha2::{Digest, Sha256};
+use sha2::Sha256;
+use crate::transcript_hash::TranscriptHash;
 
 use crate::aead::TrafficKeys;
 
@@ -265,7 +266,7 @@ impl KeySchedule {
         );
 
         // Derive intermediate secret: Derive-Secret(Early Secret, "derived", "")
-        let empty_hash = Sha256::digest(&[]);
+        let empty_hash = TranscriptHash::empty_hash();
         let derived_secret = derive_secret(&self.current_secret, "derived", &empty_hash);
 
         // Extract with the shared secret
@@ -294,7 +295,7 @@ impl KeySchedule {
         );
 
         // Derive intermediate secret: Derive-Secret(Handshake Secret, "derived", "")
-        let empty_hash = Sha256::digest(&[]);
+        let empty_hash = TranscriptHash::empty_hash();
         let derived_secret = derive_secret(&self.current_secret, "derived", &empty_hash);
 
         // Extract with zero-filled IKM

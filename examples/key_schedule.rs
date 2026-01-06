@@ -2,14 +2,15 @@
 //! 
 //! This example shows how to:
 //! 1. Perform X25519 ECDHE key exchange
-//! 2. Progress through the key schedule stages
-//! 3. Derive handshake and application traffic secrets
+//! 2. Maintain transcript hash of handshake messages
+//! 3. Progress through the key schedule stages
+//! 4. Derive handshake and application traffic secrets
 //!
 //! This simulates what happens during a real TLS 1.3 handshake.
 
-use sha2::{Digest, Sha256};
 use tls_protocol::key_schedule::KeySchedule;
 use tls_protocol::x25519_key_exchange::X25519KeyPair;
+use tls_protocol::TranscriptHash;
 
 fn main() {
     println!("=== TLS 1.3 Key Schedule Example ===\n");
@@ -56,15 +57,17 @@ fn main() {
     println!("Handshake Secret: {:?}", hex::encode(&key_schedule.current_secret_for_testing()));
     println!();
 
-    // Step 4: Derive Handshake Traffic Secrets
-    println!("Step 4: Deriving Handshake Traffic Secrets");
-    println!("------------------------------------------");
+    // Step 4: Build Transcript Hash and Derive Handshake Traffic Secrets
+    println!("Step 4: Building Transcript Hash & Deriving Handshake Traffic Secrets");
+    println!("----------------------------------------------------------------------");
     
-    // Create mock transcript hash (ClientHello...ServerHello)
-    let mut transcript_handshake = Sha256::new();
-    transcript_handshake.update(b"ClientHello_message_bytes");
-    transcript_handshake.update(b"ServerHello_message_bytes");
-    let handshake_transcript = transcript_handshake.finalize();
+    // Create transcript hash (ClientHello...ServerHello)
+    let mut transcript = TranscriptHash::new();
+    transcript.update(b"ClientHello_message_bytes");
+    transcript.update(b"ServerHello_message_bytes");
+    let handshake_transcript = transcript.current_hash();
+    
+    println!("Transcript hash (after ServerHello): {:?}", hex::encode(&handshake_transcript));
     
     let client_hs_traffic = key_schedule
         .derive_client_handshake_traffic_secret(&handshake_transcript);
@@ -84,19 +87,18 @@ fn main() {
     println!("Master Secret: {:?}", hex::encode(&key_schedule.current_secret_for_testing()));
     println!();
 
-    // Step 6: Derive Application Traffic Secrets
-    println!("Step 6: Deriving Application Traffic Secrets");
-    println!("--------------------------------------------");
+    // Step 6: Continue Transcript & Derive Application Traffic Secrets
+    println!("Step 6: Continuing Transcript & Deriving Application Traffic Secrets");
+    println!("--------------------------------------------------------------------");
     
-    // Create mock transcript hash (ClientHello...server Finished)
-    let mut transcript_app = Sha256::new();
-    transcript_app.update(b"ClientHello_message_bytes");
-    transcript_app.update(b"ServerHello_message_bytes");
-    transcript_app.update(b"EncryptedExtensions_bytes");
-    transcript_app.update(b"Certificate_bytes");
-    transcript_app.update(b"CertificateVerify_bytes");
-    transcript_app.update(b"ServerFinished_bytes");
-    let app_transcript = transcript_app.finalize();
+    // Continue updating transcript hash (ClientHello...server Finished)
+    transcript.update(b"EncryptedExtensions_bytes");
+    transcript.update(b"Certificate_bytes");
+    transcript.update(b"CertificateVerify_bytes");
+    transcript.update(b"ServerFinished_bytes");
+    let app_transcript = transcript.current_hash();
+    
+    println!("Transcript hash (after server Finished): {:?}", hex::encode(&app_transcript));
     
     let client_app_traffic = key_schedule
         .derive_client_application_traffic_secret(&app_transcript);
