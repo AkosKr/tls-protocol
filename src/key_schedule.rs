@@ -294,7 +294,7 @@ impl KeySchedule {
         );
 
         // Derive intermediate secret: Derive-Secret(Handshake Secret, "derived", "")
-        let empty_hash = Sha256::digest([]);
+        let empty_hash = Sha256::digest(&[]);
         let derived_secret = derive_secret(&self.current_secret, "derived", &empty_hash);
 
         // Extract with zero-filled IKM
