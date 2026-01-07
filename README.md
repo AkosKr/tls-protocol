@@ -440,6 +440,110 @@ let client_app_traffic = key_schedule
 
 **Files**: [src/certificate.rs](src/certificate.rs), [tests/certificate_tests.rs](tests/certificate_tests.rs), [src/error.rs](src/error.rs)
 
+### Issue #17: Signature Verification for CertificateVerify ✅
+**Goal**: Implement digital signature verification for the CertificateVerify handshake message (RFC 8446 Section 4.4.3) to prove server possession of the private key.
+
+**Implementation**:
+- **CertificateVerify Message Structure**:
+  - `CertificateVerify` struct containing:
+    - `algorithm`: u16 - SignatureScheme identifier
+    - `signature`: Vec<u8> - Digital signature bytes (0 to 2^16-1 bytes)
+  
+  - Message parsing and serialization:
+    - `from_bytes()` - Parse CertificateVerify from wire format (handshake type 0x0f)
+    - `to_bytes()` - Serialize to RFC 8446 compliant format
+    - Strict validation of handshake type, length fields, and data completeness
+
+- **Supported Signature Algorithms**:
+  - **RSA-PSS-RSAE-SHA256** (0x0804) - Required for RSA certificates
+    - SHA-256 hash function with MGF1-SHA256
+    - Salt length: 32 bytes (hash output length)
+    - Constant-time verification via `rsa` crate
+  
+  - **RSA-PSS-RSAE-SHA384** (0x0805) - Recommended for RSA certificates
+    - SHA-384 hash function with MGF1-SHA384
+    - Salt length: 48 bytes (hash output length)
+    - Enhanced security for larger key sizes
+  
+  - **ECDSA-SECP256R1-SHA256** (0x0403) - Required for ECDSA certificates
+    - SHA-256 hash function on P-256 (secp256r1) curve
+    - Signature as ASN.1 DER-encoded (r, s) pair
+    - Validates signature components in valid range
+  
+  - **ECDSA-SECP384R1-SHA384** (0x0503) - Recommended for ECDSA certificates
+    - SHA-384 hash function on P-384 (secp384r1) curve
+    - ASN.1 DER-encoded signature format
+    - Higher security level for demanding applications
+
+- **Public Key Extraction**:
+  - `extract_public_key_from_der()` - Parses DER-encoded X.509 certificates
+  - Extracts SubjectPublicKeyInfo from certificate structure
+  - Supports RSA (PKCS#1), ECDSA P-256, and ECDSA P-384 keys
+  - Returns `PublicKey` enum with appropriate key type
+  - Validates key format and curve parameters
+
+- **Signed Content Construction** (RFC 8446, Section 4.4.3):
+  - `build_signed_content()` - Constructs message for verification
+  - Format strictly per RFC:
+    - 64 space characters (0x20)
+    - Context string: "TLS 1.3, server CertificateVerify"
+    - Single null byte (0x00)
+    - Transcript hash (32 bytes for SHA-256)
+  - Client variant uses "TLS 1.3, client CertificateVerify"
+
+- **Signature Verification Process**:
+  - `verify()` - Main verification function performing:
+    1. Extract public key from end-entity certificate
+    2. Build signed content from transcript hash
+    3. Validate algorithm matches certificate key type
+    4. Dispatch to appropriate verification function:
+       - `verify_rsa_pss_rsae_sha256()` - RSA-PSS with SHA-256
+       - `verify_rsa_pss_rsae_sha384()` - RSA-PSS with SHA-384
+       - `verify_ecdsa_secp256r1_sha256()` - ECDSA P-256 with SHA-256
+       - `verify_ecdsa_secp384r1_sha384()` - ECDSA P-384 with SHA-384
+    5. Return success or detailed error
+
+- **Error Handling**:
+  - `InvalidSignature` - Signature verification failed (cryptographic failure)
+  - `UnsupportedSignatureAlgorithm` - Algorithm not implemented
+  - `SignatureAlgorithmMismatch` - Certificate key type doesn't match signature algorithm
+  - `CertificateParsingError` - X.509 parsing failed or malformed certificate
+  - `InvalidHandshakeType` - Non-CertificateVerify message (not 0x0f)
+  - `IncompleteData` - Insufficient bytes for parsing
+  - Clear error messages with detailed context for debugging
+
+- **Security Features**:
+  - Constant-time signature verification where possible (via crypto libraries)
+  - Validates all signature parameters before verification
+  - Rejects weak or deprecated algorithms at parse time
+  - Ensures algorithm matches certificate key type (prevents algorithm confusion)
+  - Uses well-audited crypto libraries (rsa, p256, p384 from RustCrypto)
+  - No timing side-channels in verification logic
+
+- **Integration Points**:
+  - Uses Transcript Hash from Issue #15 for signed content
+  - Uses Certificate Parser from Issue #16 for public key extraction
+  - Required before Finished Message validation
+  - Depends on signature_algorithms extension negotiation (Issue #9)
+  - Blocks completion of TLS 1.3 handshake until verified
+
+**Testing** (Issue #17 requirements):
+- CertificateVerify message parsing and serialization
+- All 4 signature algorithms (RSA-PSS SHA-256/384, ECDSA P-256/384)
+- Signed content construction matches RFC 8446 format
+- Public key extraction from X.509 certificates (RSA and ECDSA)
+- Algorithm/certificate type matching validation
+- Invalid signature rejection (modified signatures should fail)
+- Wrong algorithm rejection (algorithm mismatch should fail)
+- Malformed message handling (incomplete data, wrong handshake type)
+- Roundtrip serialization (serialize → parse → compare)
+- Maximum signature length (u16::MAX) support
+- Zero-length signature handling
+- Server and client context string differentiation
+- All error conditions properly detected and reported
+
+**Files**: [src/certificate_verify.rs](src/certificate_verify.rs), [tests/certificate_verify_tests.rs](tests/certificate_verify_tests.rs), [src/error.rs](src/error.rs)
+
 ### Issue #13: HKDF-based Key Derivation Pipeline ✅
 **Goal**: Implement complete TLS 1.3 key schedule using HKDF (RFC 5869) with SHA-256, following RFC 8446 Sections 7.1 and 7.2.
 
@@ -958,10 +1062,65 @@ let bytes = certificate.to_bytes();
 // The bytes can now be wrapped in a TLS record and sent over the network
 ```
 
+### Verifying CertificateVerify Signatures
+
+```rust
+use tls_protocol::CertificateVerify;
+use tls_protocol::certificate::{Certificate, CertificateEntry};
+use tls_protocol::TranscriptHash;
+
+// After receiving Certificate and building transcript hash
+let mut transcript = TranscriptHash::new();
+transcript.update_client_hello(&client_hello);
+transcript.update_server_hello(&server_hello);
+transcript.update(b"EncryptedExtensions"); // Would be actual bytes
+transcript.update(&certificate.to_bytes());
+
+// Parse CertificateVerify message from network
+let cert_verify_bytes = receive_handshake_message(); // From network
+let cert_verify = CertificateVerify::from_bytes(&cert_verify_bytes)
+    .expect("Failed to parse CertificateVerify");
+
+// Check the signature algorithm
+println!("Signature algorithm: 0x{:04x}", cert_verify.algorithm);
+
+// Verify the signature against the certificate and transcript
+let end_entity = certificate.end_entity_certificate()
+    .expect("No certificates in chain");
+
+match cert_verify.verify(&end_entity.cert_data, &transcript.current_hash()) {
+    Ok(()) => println!("✓ Signature verification successful!"),
+    Err(e) => eprintln!("✗ Signature verification failed: {}", e),
+}
+
+// Example: Creating a CertificateVerify message (server-side)
+// Note: Actual signing requires private key, shown here for structure
+use tls_protocol::extensions::SIG_RSA_PSS_RSAE_SHA256;
+
+let signature = vec![0xaa; 256]; // Would be actual RSA-PSS signature
+let cert_verify = CertificateVerify::new(SIG_RSA_PSS_RSAE_SHA256, signature);
+
+let bytes = cert_verify.to_bytes();
+// Send over TLS connection...
+```
+
+### Supported Signature Algorithms
+
+```rust
+use tls_protocol::extensions::{
+    SIG_RSA_PSS_RSAE_SHA256,     // 0x0804 - RSA-PSS with SHA-256 (required)
+    SIG_RSA_PSS_RSAE_SHA384,     // 0x0805 - RSA-PSS with SHA-384 (recommended)
+    SIG_ECDSA_SECP256R1_SHA256,  // 0x0403 - ECDSA P-256 with SHA-256 (required)
+    SIG_ECDSA_SECP384R1_SHA384,  // 0x0503 - ECDSA P-384 with SHA-384 (recommended)
+};
+
+// All four algorithms are fully implemented and tested
+```
+
 ### Complete TLS 1.3 Handshake with Certificate
 
 ```rust
-use tls_protocol::{ClientHello, ServerHello, Certificate, CertificateEntry};
+use tls_protocol::{ClientHello, ServerHello, Certificate, CertificateEntry, CertificateVerify};
 use tls_protocol::{TranscriptHash, KeySchedule};
 
 // ... After ClientHello and ServerHello exchange ...
@@ -972,7 +1131,8 @@ transcript.update_client_hello(&client_hello);
 transcript.update_server_hello(&server_hello);
 
 // Parse encrypted extensions (would be encrypted in real TLS)
-transcript.update(b"EncryptedExtensions");
+let encrypted_extensions_bytes = receive_handshake_message();
+transcript.update(&encrypted_extensions_bytes);
 
 // Parse Certificate message
 let certificate_bytes = receive_handshake_message(); // From network
@@ -985,16 +1145,25 @@ transcript.update(&certificate_bytes);
 // Verify it's server authentication
 assert!(certificate.is_server_authentication());
 
-// Extract end-entity certificate for verification
+// Extract end-entity certificate for signature verification
 let end_entity = certificate.end_entity_certificate()
     .expect("No certificates in chain");
 
-// Verify the certificate chain
-// (X.509 verification would happen here using end_entity.cert_data)
+// Parse CertificateVerify message
+let cert_verify_bytes = receive_handshake_message(); // From network
+let cert_verify = CertificateVerify::from_bytes(&cert_verify_bytes)
+    .expect("Failed to parse CertificateVerify");
 
-// Continue with CertificateVerify and Finished messages...
-transcript.update(b"CertificateVerify");
-transcript.update(b"Finished");
+// Verify the signature proves server has the private key
+cert_verify.verify(&end_entity.cert_data, &transcript.current_hash())
+    .expect("Signature verification failed - server doesn't possess private key!");
+
+// Update transcript with CertificateVerify
+transcript.update(&cert_verify_bytes);
+
+// Continue with Finished message...
+let finished_bytes = receive_handshake_message();
+transcript.update(&finished_bytes);
 
 let handshake_hash = transcript.current_hash();
 // Use handshake_hash for key derivation...

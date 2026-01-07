@@ -67,6 +67,18 @@ pub enum TlsError {
     /// Invalid certificate data (malformed DER or length mismatch)
     /// Carries a description of the error.
     InvalidCertificateData(String),
+    /// Signature verification failed
+    /// Carries a description of the error.
+    InvalidSignature(String),
+    /// Unsupported signature algorithm
+    /// Carries the signature scheme identifier.
+    UnsupportedSignatureAlgorithm(u16),
+    /// Signature algorithm doesn't match certificate key type
+    /// Carries a description of the mismatch.
+    SignatureAlgorithmMismatch(String),
+    /// Certificate parsing error
+    /// Carries a description of the error.
+    CertificateParsingError(String),
 }
 
 impl fmt::Display for TlsError {
@@ -159,6 +171,18 @@ impl fmt::Display for TlsError {
             }
             TlsError::InvalidCertificateData(desc) => {
                 write!(f, "Invalid certificate data: {desc}")
+            }
+            TlsError::InvalidSignature(desc) => {
+                write!(f, "Signature verification failed: {desc}")
+            }
+            TlsError::UnsupportedSignatureAlgorithm(algorithm) => {
+                write!(f, "Unsupported signature algorithm: 0x{algorithm:04x}")
+            }
+            TlsError::SignatureAlgorithmMismatch(desc) => {
+                write!(f, "Signature algorithm mismatch: {desc}")
+            }
+            TlsError::CertificateParsingError(desc) => {
+                write!(f, "Certificate parsing error: {desc}")
             }
         }
     }
