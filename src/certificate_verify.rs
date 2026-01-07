@@ -38,7 +38,7 @@ use p256::ecdsa::{
     signature::Verifier, Signature as P256Signature, VerifyingKey as P256VerifyingKey,
 };
 use p384::ecdsa::{
-    signature::Verifier as _, Signature as P384Signature, VerifyingKey as P384VerifyingKey,
+    Signature as P384Signature, VerifyingKey as P384VerifyingKey,
 };
 use rsa::RsaPublicKey;
 use sha2::{Digest, Sha256, Sha384};
