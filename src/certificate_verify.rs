@@ -215,7 +215,11 @@ impl CertificateVerify {
     /// * `Err(TlsError)` if signature is invalid or verification fails
     pub fn verify(&self, cert_data: &[u8], transcript_hash: &[u8; 32]) -> Result<(), TlsError> {
         // Preserve existing behavior: verify using the server CertificateVerify context.
-        self.verify_with_context(cert_data, transcript_hash, SERVER_CERTIFICATE_VERIFY_CONTEXT)
+        self.verify_with_context(
+            cert_data,
+            transcript_hash,
+            SERVER_CERTIFICATE_VERIFY_CONTEXT,
+        )
     }
 
     /// Verify a CertificateVerify message using the client context.
@@ -227,7 +231,11 @@ impl CertificateVerify {
         cert_data: &[u8],
         transcript_hash: &[u8; 32],
     ) -> Result<(), TlsError> {
-        self.verify_with_context(cert_data, transcript_hash, CLIENT_CERTIFICATE_VERIFY_CONTEXT)
+        self.verify_with_context(
+            cert_data,
+            transcript_hash,
+            CLIENT_CERTIFICATE_VERIFY_CONTEXT,
+        )
     }
 
     /// Internal helper to verify a CertificateVerify message with an explicit context.
@@ -235,7 +243,7 @@ impl CertificateVerify {
         &self,
         cert_data: &[u8],
         transcript_hash: &[u8; 32],
-        context: &'static [u8],
+        context: &str,
     ) -> Result<(), TlsError> {
         // Extract public key from certificate
         let public_key = extract_public_key_from_der(cert_data)?;
