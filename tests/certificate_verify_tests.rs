@@ -409,10 +409,9 @@ fn test_verify_client_method() {
             // Expected error - certificate parsing failed, which means verify_client()
             // correctly delegated to verify_with_context and attempted verification
         }
-        Err(other) => {
+        Err(_) => {
             // Also acceptable - other verification errors show the path was exercised
             // (e.g., if the certificate parser is more lenient)
-            eprintln!("verify_client() produced error: {:?}", other);
         }
         Ok(_) => panic!("Expected verify_client() to fail with invalid certificate data"),
     }
