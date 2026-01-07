@@ -214,12 +214,34 @@ impl CertificateVerify {
     /// * `Ok(())` if signature is valid
     /// * `Err(TlsError)` if signature is invalid or verification fails
     pub fn verify(&self, cert_data: &[u8], transcript_hash: &[u8; 32]) -> Result<(), TlsError> {
+        // Preserve existing behavior: verify using the server CertificateVerify context.
+        self.verify_with_context(cert_data, transcript_hash, SERVER_CERTIFICATE_VERIFY_CONTEXT)
+    }
+
+    /// Verify a CertificateVerify message using the client context.
+    ///
+    /// This is used when validating a client's CertificateVerify message in mutual TLS
+    /// handshakes, where the context string differs from the server case.
+    pub fn verify_client(
+        &self,
+        cert_data: &[u8],
+        transcript_hash: &[u8; 32],
+    ) -> Result<(), TlsError> {
+        self.verify_with_context(cert_data, transcript_hash, CLIENT_CERTIFICATE_VERIFY_CONTEXT)
+    }
+
+    /// Internal helper to verify a CertificateVerify message with an explicit context.
+    fn verify_with_context(
+        &self,
+        cert_data: &[u8],
+        transcript_hash: &[u8; 32],
+        context: &'static [u8],
+    ) -> Result<(), TlsError> {
         // Extract public key from certificate
         let public_key = extract_public_key_from_der(cert_data)?;
 
         // Build signed content (RFC 8446, Section 4.4.3)
-        let signed_content =
-            build_signed_content(transcript_hash, SERVER_CERTIFICATE_VERIFY_CONTEXT);
+        let signed_content = build_signed_content(transcript_hash, context);
 
         // Verify signature based on algorithm
         match self.algorithm {
