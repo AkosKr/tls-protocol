@@ -3,6 +3,7 @@ use std::convert::TryFrom;
 // Re-export modules for convenient access
 pub mod aead;
 pub mod certificate;
+pub mod certificate_verify;
 pub mod client_hello;
 pub mod decoder;
 pub mod error;
@@ -15,20 +16,21 @@ pub mod transcript_hash;
 pub mod x25519_key_exchange;
 
 // Re-export commonly used types
-pub use aead::{AeadCipher, TrafficKeys, encrypt_record, decrypt_record};
+pub use aead::{decrypt_record, encrypt_record, AeadCipher, TrafficKeys};
 pub use certificate::{Certificate, CertificateEntry};
+pub use certificate_verify::CertificateVerify;
 pub use client_hello::ClientHello;
 pub use decoder::decode_header;
 pub use error::TlsError;
 pub use extensions::{Extension, KeyShareEntry};
-pub use key_schedule::{KeySchedule, derive_traffic_keys};
+pub use key_schedule::{derive_traffic_keys, KeySchedule};
 pub use parser::parse_header;
 pub use server_hello::ServerHello;
 pub use transcript_hash::TranscriptHash;
-pub use x25519_key_exchange::{X25519KeyPair, compute_shared_secret, parse_key_share_entry};
+pub use x25519_key_exchange::{compute_shared_secret, parse_key_share_entry, X25519KeyPair};
 
 /// Maximum allowed length for a TLS record payload in bytes.
-/// 
+///
 /// According to RFC 8446, this is 2^14 + 256 = 16640 bytes.
 pub const MAX_RECORD_LENGTH: u16 = (1 << 14) + 256;
 
@@ -98,7 +100,6 @@ impl From<(ContentType, u16, u16)> for RecordHeader {
         }
     }
 }
-
 
 #[cfg(test)]
 mod tests {

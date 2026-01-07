@@ -11,3 +11,10 @@ rand = "0.8"
 sha2 = "0.10.9"
 x25519-dalek = "2.0"
 zeroize = "1.7"
+
+# Signature verification (Issue #17)
+rsa = "0.9"
+p256 = { version = "0.13", features = ["ecdsa"] }
+p384 = { version = "0.13", features = ["ecdsa"] }
+x509-parser = "0.16"
+signature = "2.2"
