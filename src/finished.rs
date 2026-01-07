@@ -53,11 +53,10 @@
 //! );
 //! let finished_bytes = finished.to_bytes();
 //!
-//! // Server side - Verify Finished message
-//! # let server_secret = [0u8; 32];
+//! // Server side - Verify client's Finished message
 //! let received_finished = Finished::from_bytes(&finished_bytes).unwrap();
-//! received_finished.verify_server_finished(
-//!     &server_secret,
+//! received_finished.verify_client_finished(
+//!     client_secret,
 //!     &transcript.current_hash()
 //! ).unwrap();
 //! # }
