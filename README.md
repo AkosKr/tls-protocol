@@ -1073,11 +1073,12 @@ use tls_protocol::TranscriptHash;
 let mut transcript = TranscriptHash::new();
 transcript.update_client_hello(&client_hello);
 transcript.update_server_hello(&server_hello);
-transcript.update(b"EncryptedExtensions"); // Would be actual bytes
+transcript.update(&encrypted_extensions_bytes); // Serialized EncryptedExtensions handshake message bytes
 transcript.update(&certificate.to_bytes());
 
 // Parse CertificateVerify message from network
-let cert_verify_bytes = receive_handshake_message(); // From network
+// Note: receive_handshake_message() is a placeholder for actual network I/O
+let cert_verify_bytes = receive_handshake_message(); // Retrieve handshake message bytes from network
 let cert_verify = CertificateVerify::from_bytes(&cert_verify_bytes)
     .expect("Failed to parse CertificateVerify");
 
