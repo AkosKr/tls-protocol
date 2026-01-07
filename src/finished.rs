@@ -228,7 +228,7 @@ impl Finished {
         let mut expected_verify_data = compute_verify_data(&finished_key, transcript_hash);
 
         // Constant-time comparison to prevent timing attacks
-        let result =if self.verify_data.ct_eq(&expected_verify_data).into() {
+        let result = if self.verify_data.ct_eq(&expected_verify_data).into() {
             Ok(())
         } else {
             Err(TlsError::InvalidFinished)
