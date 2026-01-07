@@ -91,8 +91,9 @@ pub enum TlsError {
         received: String,
         state: String,
     },
-    /// Invalid state for the requested operation
-    /// Carries a description of the error.
+    /// Invalid state for the requested operation (reserved for future use)
+    /// Carries a description of the error. This variant is currently not emitted
+    /// by the implementation but is kept for future protocol state validation.
     InvalidState(String),
     /// Message received in wrong encryption state
     /// Contains message type, expected encryption state, and actual encryption state
