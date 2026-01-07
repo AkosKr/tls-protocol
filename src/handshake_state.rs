@@ -226,7 +226,7 @@ impl TlsHandshake {
         match self.state {
             HandshakeState::ServerHelloReceived => {
                 // Defensive check: Validate encryption state is correct for this message.
-                // This should always pass under normal operation since on_server_hello_received()
+                // This should always pass under normal operation since `on_server_hello_received()`
                 // sets HandshakeEncryption, but provides defense-in-depth against state corruption.
                 if self.encryption_state != EncryptionState::HandshakeEncryption {
                     let error = format!(
@@ -265,7 +265,7 @@ impl TlsHandshake {
         match self.state {
             HandshakeState::EncryptedExtensionsReceived => {
                 // Defensive check: Validate encryption state is correct for this message.
-                // This should always pass under normal operation since on_server_hello_received()
+                // This should always pass under normal operation since `on_server_hello_received()`
                 // sets HandshakeEncryption, but provides defense-in-depth against state corruption.
                 if self.encryption_state != EncryptionState::HandshakeEncryption {
                     let error = format!(
@@ -304,7 +304,7 @@ impl TlsHandshake {
         match self.state {
             HandshakeState::CertificateReceived => {
                 // Defensive check: Validate encryption state is correct for this message.
-                // This should always pass under normal operation since on_server_hello_received()
+                // This should always pass under normal operation since `on_server_hello_received()`
                 // sets HandshakeEncryption, but provides defense-in-depth against state corruption.
                 if self.encryption_state != EncryptionState::HandshakeEncryption {
                     let error = format!(
@@ -343,7 +343,7 @@ impl TlsHandshake {
         match self.state {
             HandshakeState::CertificateVerifyReceived => {
                 // Defensive check: Validate encryption state is correct for this message.
-                // This should always pass under normal operation since on_server_hello_received()
+                // This should always pass under normal operation since `on_server_hello_received()`
                 // sets HandshakeEncryption, but provides defense-in-depth against state corruption.
                 if self.encryption_state != EncryptionState::HandshakeEncryption {
                     let error = format!(
@@ -407,7 +407,7 @@ impl TlsHandshake {
         match self.state {
             HandshakeState::ClientFinishedSent | HandshakeState::Connected => {
                 // Defensive check: Validate encryption state is correct for this message.
-                // This should always pass under normal operation since on_client_finished_sent()
+                // This should always pass under normal operation since `on_client_finished_sent()`
                 // sets ApplicationEncryption, but provides defense-in-depth against state corruption.
                 if self.encryption_state != EncryptionState::ApplicationEncryption {
                     let error = format!(
