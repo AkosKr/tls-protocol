@@ -64,7 +64,7 @@
 //! ```
 
 use crate::error::TlsError;
-use crate::key_schedule::hkdf_expand;
+use crate::key_schedule::hkdf_expand_label;
 use hmac::{Hmac, Mac};
 use sha2::Sha256;
 use subtle::ConstantTimeEq;
@@ -126,8 +126,9 @@ impl Finished {
         client_handshake_traffic_secret: &[u8],
         transcript_hash: &[u8],
     ) -> Self {
-        let finished_key = derive_finished_key(client_handshake_traffic_secret);
+        let mut finished_key = derive_finished_key(client_handshake_traffic_secret);
         let verify_data = compute_verify_data(&finished_key, transcript_hash);
+        finished_key.zeroize();
         Self::new(verify_data)
     }
 
@@ -148,8 +149,9 @@ impl Finished {
         server_handshake_traffic_secret: &[u8],
         transcript_hash: &[u8],
     ) -> Self {
-        let finished_key = derive_finished_key(server_handshake_traffic_secret);
+        let mut finished_key = derive_finished_key(server_handshake_traffic_secret);
         let verify_data = compute_verify_data(&finished_key, transcript_hash);
+        finished_key.zeroize();
         Self::new(verify_data)
     }
 
@@ -186,15 +188,20 @@ impl Finished {
         server_handshake_traffic_secret: &[u8],
         transcript_hash: &[u8],
     ) -> Result<(), TlsError> {
-        let finished_key = derive_finished_key(server_handshake_traffic_secret);
-        let expected_verify_data = compute_verify_data(&finished_key, transcript_hash);
+        let mut finished_key = derive_finished_key(server_handshake_traffic_secret);
+        let mut expected_verify_data = compute_verify_data(&finished_key, transcript_hash);
 
         // Constant-time comparison to prevent timing attacks
-        if self.verify_data.ct_eq(&expected_verify_data).into() {
+        let result = if self.verify_data.ct_eq(&expected_verify_data).into() {
             Ok(())
         } else {
             Err(TlsError::InvalidFinished)
-        }
+        };
+
+        finished_key.zeroize();
+        expected_verify_data.zeroize();
+        
+        result
     }
 
     /// Verify a client Finished message (server-side verification)
@@ -218,15 +225,20 @@ impl Finished {
         client_handshake_traffic_secret: &[u8],
         transcript_hash: &[u8],
     ) -> Result<(), TlsError> {
-        let finished_key = derive_finished_key(client_handshake_traffic_secret);
-        let expected_verify_data = compute_verify_data(&finished_key, transcript_hash);
+        let mut finished_key = derive_finished_key(client_handshake_traffic_secret);
+        let mut expected_verify_data = compute_verify_data(&finished_key, transcript_hash);
 
         // Constant-time comparison to prevent timing attacks
-        if self.verify_data.ct_eq(&expected_verify_data).into() {
+        let result =if self.verify_data.ct_eq(&expected_verify_data).into() {
             Ok(())
         } else {
             Err(TlsError::InvalidFinished)
-        }
+        };
+
+        finished_key.zeroize();
+        expected_verify_data.zeroize();
+
+        result
     }
 
     /// Get the verify_data
@@ -372,30 +384,10 @@ impl Finished {
 /// - Context: empty (zero-length)
 /// - Length: 32 (SHA-256 output size)
 fn derive_finished_key(handshake_traffic_secret: &[u8]) -> [u8; VERIFY_DATA_LEN] {
-    // Construct HkdfLabel for HKDF-Expand-Label
-    let label = "finished";
-    let context: &[u8] = &[];
-    let length = VERIFY_DATA_LEN;
-
-    let mut hkdf_label = Vec::new();
-
-    // Length (2 bytes)
-    hkdf_label.extend_from_slice(&(length as u16).to_be_bytes());
-
-    // Label with "tls13 " prefix
-    let full_label = format!("tls13 {}", label);
-    hkdf_label.push(full_label.len() as u8);
-    hkdf_label.extend_from_slice(full_label.as_bytes());
-
-    // Context (empty)
-    hkdf_label.push(context.len() as u8);
-    hkdf_label.extend_from_slice(context);
-
-    // Perform HKDF-Expand
+    let mut expanded = hkdf_expand_label(handshake_traffic_secret, "finished", &[], VERIFY_DATA_LEN);
     let mut finished_key = [0u8; VERIFY_DATA_LEN];
-    let expanded = hkdf_expand(handshake_traffic_secret, &hkdf_label, length);
     finished_key.copy_from_slice(&expanded);
-
+    expanded.zeroize();
     finished_key
 }
 

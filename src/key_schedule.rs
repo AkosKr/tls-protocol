@@ -119,7 +119,7 @@ pub fn hkdf_expand(prk: &[u8], info: &[u8], length: usize) -> Vec<u8> {
 /// * `label` - The label string (without "tls13 " prefix)
 /// * `context` - Context data (usually a hash)
 /// * `length` - Desired output length
-fn hkdf_expand_label(secret: &[u8], label: &str, context: &[u8], length: usize) -> Vec<u8> {
+pub fn hkdf_expand_label(secret: &[u8], label: &str, context: &[u8], length: usize) -> Vec<u8> {
     // Construct HkdfLabel
     let mut hkdf_label = Vec::new();
     
