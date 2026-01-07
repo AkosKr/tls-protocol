@@ -59,6 +59,14 @@ pub enum TlsError {
     RecordTooLarge,
     /// Invalid record format
     InvalidRecord,
+    /// Empty certificate list (at least one certificate required for server auth)
+    EmptyCertificateList,
+    /// Certificate chain exceeds maximum allowed length
+    /// Carries the number of certificates in the chain.
+    CertificateChainTooLong(usize),
+    /// Invalid certificate data (malformed DER or length mismatch)
+    /// Carries a description of the error.
+    InvalidCertificateData(String),
 }
 
 impl fmt::Display for TlsError {
@@ -93,7 +101,10 @@ impl fmt::Display for TlsError {
                 write!(f, "Invalid or unsupported cipher suite: 0x{suite:04x}")
             }
             TlsError::InvalidCompressionMethod(method) => {
-                write!(f, "Invalid compression method: 0x{method:02x}, expected 0x00")
+                write!(
+                    f,
+                    "Invalid compression method: 0x{method:02x}, expected 0x00"
+                )
             }
             TlsError::InvalidRandom => {
                 write!(f, "Invalid random field")
@@ -102,10 +113,16 @@ impl fmt::Display for TlsError {
                 write!(f, "Downgrade protection violation detected")
             }
             TlsError::InvalidKeyLength(length) => {
-                write!(f, "Invalid key length: {length} bytes, expected 32 bytes for X25519")
+                write!(
+                    f,
+                    "Invalid key length: {length} bytes, expected 32 bytes for X25519"
+                )
             }
             TlsError::InvalidPublicKey => {
-                write!(f, "Invalid public key: weak, malformed, or non-canonical value")
+                write!(
+                    f,
+                    "Invalid public key: weak, malformed, or non-canonical value"
+                )
             }
             TlsError::KeyExchangeFailed(desc) => {
                 write!(f, "Key exchange failed: {desc}")
@@ -114,16 +131,34 @@ impl fmt::Display for TlsError {
                 write!(f, "Encryption operation failed")
             }
             TlsError::DecryptionFailed => {
-                write!(f, "Decryption operation failed (authentication tag verification failed)")
+                write!(
+                    f,
+                    "Decryption operation failed (authentication tag verification failed)"
+                )
             }
             TlsError::SequenceNumberOverflow => {
-                write!(f, "Sequence number overflow: maximum records encrypted with this key")
+                write!(
+                    f,
+                    "Sequence number overflow: maximum records encrypted with this key"
+                )
             }
             TlsError::RecordTooLarge => {
                 write!(f, "Record size exceeds maximum allowed")
             }
             TlsError::InvalidRecord => {
                 write!(f, "Invalid record format")
+            }
+            TlsError::EmptyCertificateList => {
+                write!(f, "Empty certificate list: at least one certificate is required for server authentication")
+            }
+            TlsError::CertificateChainTooLong(count) => {
+                write!(
+                    f,
+                    "Certificate chain too long: {count} certificates (maximum 10 allowed)"
+                )
+            }
+            TlsError::InvalidCertificateData(desc) => {
+                write!(f, "Invalid certificate data: {desc}")
             }
         }
     }

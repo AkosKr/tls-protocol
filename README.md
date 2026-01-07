@@ -366,6 +366,80 @@ let client_app_traffic = key_schedule
 
 **Files**: [src/transcript_hash.rs](src/transcript_hash.rs), [tests/transcript_hash_tests.rs](tests/transcript_hash_tests.rs)
 
+### Issue #16: Certificate Message Parser ✅
+**Goal**: Develop a parser for the TLS Certificate handshake message (RFC 8446 Section 4.4.2) to extract and validate DER-encoded X.509 certificate chains with per-certificate extensions.
+
+**Implementation**:
+- **Certificate Message Structure**:
+  - `CertificateEntry` struct containing:
+    - `cert_data`: Vec<u8> - DER-encoded X.509 certificate (1 to 2^24-1 bytes)
+    - `extensions`: Vec<Extension> - Per-certificate extensions
+  - `Certificate` struct containing:
+    - `certificate_request_context`: Vec<u8> - Context for client authentication (0 to 255 bytes, empty for server auth)
+    - `certificate_list`: Vec<CertificateEntry> - Chain of certificates
+
+- **Certificate Parsing** (`Certificate::from_bytes`):
+  - Validates handshake type (0x0b for Certificate message)
+  - Parses certificate_request_context with 1-byte length prefix
+  - Extracts certificate_list with 3-byte length prefix
+  - For each certificate entry:
+    - Parses 3-byte certificate data length field
+    - Extracts DER-encoded X.509 certificate data
+    - Parses 2-byte extensions length field
+    - Extracts per-certificate extensions
+  - Integrates with existing Extension framework from Issue #9
+
+- **Certificate Serialization** (`Certificate::to_bytes`):
+  - Produces RFC 8446 compliant wire format:
+    - Handshake type (1 byte): 0x0b
+    - Message length (3 bytes)
+    - Context length (1 byte) + context data
+    - Certificate list length (3 bytes)
+    - For each entry: cert_data length (3 bytes) + DER bytes + extensions
+
+- **Validation Features**:
+  - `Certificate::validate()` - Comprehensive validation
+  - Ensures at least one certificate is present (for server authentication)
+  - Validates certificate_request_context doesn't exceed 255 bytes
+  - Enforces maximum chain length of 10 certificates
+  - Validates each certificate entry (non-empty, size limits)
+  - Early rejection of malformed messages
+
+- **Utility Methods**:
+  - `is_server_authentication()` - Checks if context is empty (server auth vs client auth)
+  - `end_entity_certificate()` - Returns the first certificate (leaf/end-entity certificate)
+  - `CertificateEntry::validate()` - Validates individual certificate entry
+
+- **Security Considerations**:
+  - `MAX_CERTIFICATE_CHAIN_LENGTH` constant set to 10 certificates
+  - Strict length validation to prevent buffer overflows
+  - No unbounded memory allocation
+  - 3-byte length fields validated against available data
+  - Early rejection prevents resource exhaustion
+
+- **Error Handling**:
+  - `EmptyCertificateList` - No certificates present (required for server auth)
+  - `CertificateChainTooLong` - Exceeds maximum 10 certificates
+  - `InvalidCertificateData` - Malformed DER, length mismatch, or structural errors
+  - `InvalidHandshakeType` - Non-Certificate message (not 0x0b)
+  - `IncompleteData` - Insufficient bytes for parsing
+
+**Testing** (Issue #16 requirements):
+- Valid certificate parsing with 1, 2, and 3+ certificate chains
+- Empty certificate list rejection
+- Invalid length fields (too short, mismatched, overflow)
+- Certificate request context validation (empty for server auth)
+- Maximum chain length enforcement (10 certificates)
+- Zero-length certificate data rejection
+- Roundtrip serialization (serialize → parse → compare)
+- Real-world DER certificate structure patterns
+- Handshake type validation (must be 0x0b)
+- Extensions integration with certificate entries
+- End-entity certificate extraction
+- Length field calculations in wire format
+
+**Files**: [src/certificate.rs](src/certificate.rs), [tests/certificate_tests.rs](tests/certificate_tests.rs), [src/error.rs](src/error.rs)
+
 ### Issue #13: HKDF-based Key Derivation Pipeline ✅
 **Goal**: Implement complete TLS 1.3 key schedule using HKDF (RFC 5869) with SHA-256, following RFC 8446 Sections 7.1 and 7.2.
 
@@ -430,25 +504,30 @@ let client_app_traffic = key_schedule
 tls-protocol/
 ├── src/
 │   ├── lib.rs              # Core types and exports
-│   ├── error.rs            # Error types with extension error variants
+│   ├── error.rs            # Error types with extension and certificate error variants
 │   ├── parser.rs           # Header parsing logic
 │   ├── decoder.rs          # Header decoding
 │   ├── tls_stream.rs       # TCP stream wrapper
 │   ├── extensions.rs       # TLS extensions framework
 │   ├── client_hello.rs     # ClientHello message implementation
 │   ├── server_hello.rs     # ServerHello message parser
+│   ├── certificate.rs      # Certificate message parser
 │   ├── x25519_key_exchange.rs # X25519 key exchange implementation
 │   ├── transcript_hash.rs  # Transcript hash manager (SHA-256)
-│   └── key_schedule.rs     # HKDF-based key derivation pipeline
+│   ├── key_schedule.rs     # HKDF-based key derivation pipeline
+│   └── aead.rs             # AEAD encryption/decryption
 ├── tests/
 │   ├── parser_tests.rs     # Parser validation tests
 │   ├── decoder_tests.rs    # Decoder tests
 │   ├── tls_stream_tests.rs # Stream tests
 │   ├── client_hello_tests.rs # ClientHello tests
 │   ├── server_hello_tests.rs # ServerHello parser tests
+│   ├── certificate_tests.rs # Certificate parser tests
+│   ├── extension_tests.rs  # Extension framework tests
 │   ├── x25519_key_exchange_tests.rs # X25519 key exchange tests
 │   ├── transcript_hash_tests.rs # Transcript hash tests
-│   └── key_schedule_tests.rs # HKDF and key schedule tests
+│   ├── key_schedule_tests.rs # HKDF and key schedule tests
+│   └── aead_tests.rs       # AEAD encryption tests
 ├── examples/
 │   ├── client.rs           # Example TLS client
 │   └── server.rs           # Example TLS server
@@ -819,6 +898,108 @@ let server_hello = ServerHello::new(
 let bytes = server_hello.to_bytes();
 ```
 
+### Parsing Certificate Messages
+
+```rust
+use tls_protocol::certificate::{Certificate, CertificateEntry};
+use tls_protocol::extensions::Extension;
+
+// Parse a Certificate message from received bytes
+let certificate_bytes = received_data; // From network
+let certificate = Certificate::from_bytes(&certificate_bytes)
+    .expect("Failed to parse Certificate");
+
+// Check if it's server authentication (empty context)
+if certificate.is_server_authentication() {
+    println!("Server authentication certificate chain");
+}
+
+// Get the end-entity (leaf) certificate
+if let Some(end_entity) = certificate.end_entity_certificate() {
+    println!("Server certificate: {} bytes", end_entity.cert_data.len());
+    
+    // Access the DER-encoded X.509 certificate data
+    let der_cert = &end_entity.cert_data;
+    
+    // Process certificate extensions (if any)
+    for ext in &end_entity.extensions {
+        println!("Certificate extension: {:?}", ext);
+    }
+}
+
+// Iterate through the certificate chain
+println!("Certificate chain length: {}", certificate.certificate_list.len());
+for (i, entry) in certificate.certificate_list.iter().enumerate() {
+    println!("Certificate {}: {} bytes", i, entry.cert_data.len());
+}
+
+// Create a Certificate message (for testing/server implementation)
+// Example: Server sending its certificate chain
+let server_cert_der = vec![0x30, 0x82, 0x03, 0x50]; // DER-encoded certificate
+// ... (full DER certificate data)
+
+let intermediate_cert_der = vec![0x30, 0x82, 0x02, 0x00]; // DER-encoded intermediate
+// ... (full DER certificate data)
+
+let cert_entry1 = CertificateEntry::new(server_cert_der, vec![]);
+let cert_entry2 = CertificateEntry::new(intermediate_cert_der, vec![]);
+
+let certificate = Certificate::new(
+    vec![], // Empty context for server authentication
+    vec![cert_entry1, cert_entry2],
+);
+
+// Validate the certificate message
+certificate.validate().expect("Invalid certificate");
+
+// Serialize to bytes for sending
+let bytes = certificate.to_bytes();
+
+// The bytes can now be wrapped in a TLS record and sent over the network
+```
+
+### Complete TLS 1.3 Handshake with Certificate
+
+```rust
+use tls_protocol::{ClientHello, ServerHello, Certificate, CertificateEntry};
+use tls_protocol::{TranscriptHash, KeySchedule};
+
+// ... After ClientHello and ServerHello exchange ...
+
+// Server sends Certificate message
+let mut transcript = TranscriptHash::new();
+transcript.update_client_hello(&client_hello);
+transcript.update_server_hello(&server_hello);
+
+// Parse encrypted extensions (would be encrypted in real TLS)
+transcript.update(b"EncryptedExtensions");
+
+// Parse Certificate message
+let certificate_bytes = receive_handshake_message(); // From network
+let certificate = Certificate::from_bytes(&certificate_bytes)
+    .expect("Failed to parse Certificate");
+
+// Update transcript with Certificate message
+transcript.update(&certificate_bytes);
+
+// Verify it's server authentication
+assert!(certificate.is_server_authentication());
+
+// Extract end-entity certificate for verification
+let end_entity = certificate.end_entity_certificate()
+    .expect("No certificates in chain");
+
+// Verify the certificate chain
+// (X.509 verification would happen here using end_entity.cert_data)
+
+// Continue with CertificateVerify and Finished messages...
+transcript.update(b"CertificateVerify");
+transcript.update(b"Finished");
+
+let handshake_hash = transcript.current_hash();
+// Use handshake_hash for key derivation...
+```
+
 ### Parsing TLS Records
 
 ```rust
@@ -846,6 +1027,13 @@ cargo test --test parser_tests
 cargo test --test decoder_tests
 cargo test --test tls_stream_tests
 cargo test --test client_hello_tests
+cargo test --test server_hello_tests
+cargo test --test certificate_tests
+cargo test --test extension_tests
+cargo test --test x25519_key_exchange_tests
+cargo test --test transcript_hash_tests
+cargo test --test key_schedule_tests
+cargo test --test aead_tests
 ```
 
 Run examples:
@@ -866,6 +1054,8 @@ cargo run --example client
 
 - [RFC 8446 - The Transport Layer Security (TLS) Protocol Version 1.3](https://datatracker.ietf.org/doc/html/rfc8446)
 - [RFC 5246 - The Transport Layer Security (TLS) Protocol Version 1.2](https://datatracker.ietf.org/doc/html/rfc5246)
+- [RFC 5280 - Internet X.509 Public Key Infrastructure Certificate and CRL Profile](https://datatracker.ietf.org/doc/html/rfc5280)
+- [RFC 5869 - HMAC-based Extract-and-Expand Key Derivation Function (HKDF)](https://datatracker.ietf.org/doc/html/rfc5869)
 
 ## License
 

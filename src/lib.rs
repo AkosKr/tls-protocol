@@ -2,6 +2,7 @@ use std::convert::TryFrom;
 
 // Re-export modules for convenient access
 pub mod aead;
+pub mod certificate;
 pub mod client_hello;
 pub mod decoder;
 pub mod error;
@@ -15,6 +16,7 @@ pub mod x25519_key_exchange;
 
 // Re-export commonly used types
 pub use aead::{AeadCipher, TrafficKeys, encrypt_record, decrypt_record};
+pub use certificate::{Certificate, CertificateEntry};
 pub use client_hello::ClientHello;
 pub use decoder::decode_header;
 pub use error::TlsError;
