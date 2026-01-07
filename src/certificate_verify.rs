@@ -37,9 +37,13 @@ use crate::extensions::{
 use p256::ecdsa::{
     signature::Verifier, Signature as P256Signature, VerifyingKey as P256VerifyingKey,
 };
-use p384::ecdsa::{Signature as P384Signature, VerifyingKey as P384VerifyingKey};
+use p384::ecdsa::{
+    signature::Verifier as _, Signature as P384Signature, VerifyingKey as P384VerifyingKey,
+};
 use rsa::RsaPublicKey;
 use sha2::{Digest, Sha256, Sha384};
+use x509_parser::der_parser::asn1_rs::Oid;
+use x509_parser::der_parser::oid;
 use x509_parser::oid_registry;
 use x509_parser::prelude::*;
 
@@ -48,6 +52,10 @@ pub const SERVER_CERTIFICATE_VERIFY_CONTEXT: &str = "TLS 1.3, server Certificate
 
 /// Context string for client CertificateVerify (RFC 8446, Section 4.4.3)
 pub const CLIENT_CERTIFICATE_VERIFY_CONTEXT: &str = "TLS 1.3, client CertificateVerify";
+
+/// OID for P-384 curve (secp384r1): 1.3.132.0.34
+/// Note: This constant is not available in x509_parser::oid_registry as of version 0.16
+const OID_EC_P384: Oid<'static> = oid!(1.3.132 .0 .34);
 
 /// Number of space characters (0x20) prepended to signed content
 const SIGNED_CONTENT_PADDING: usize = 64;
@@ -391,7 +399,7 @@ fn parse_ecdsa_public_key(spki: &SubjectPublicKeyInfo) -> Result<PublicKey, TlsE
                     e
                 ))
             })
-    } else if curve_oid.to_string() == "1.3.132.0.34" {
+    } else if curve_oid == OID_EC_P384 {
         // P-384 curve (secp384r1)
         P384VerifyingKey::from_sec1_bytes(key_data)
             .map(PublicKey::EcdsaP384)
