@@ -84,6 +84,26 @@ pub enum TlsError {
     InvalidHandshakeMessage(String),
     /// Finished message verification failed (verify_data mismatch)
     InvalidFinished,
+    /// Unexpected message in current handshake state
+    /// Contains expected state, received message, and current state
+    UnexpectedMessage {
+        expected: String,
+        received: String,
+        state: String,
+    },
+    /// Invalid state for the requested operation
+    /// Carries a description of the error.
+    InvalidState(String),
+    /// Message received in wrong encryption state
+    /// Contains message type, expected encryption state, and actual encryption state
+    MessageInWrongEncryptionState {
+        message: String,
+        expected_encryption: String,
+        actual_encryption: String,
+    },
+    /// Handshake failed
+    /// Carries a description of the failure.
+    HandshakeFailed(String),
 }
 
 impl fmt::Display for TlsError {
@@ -193,7 +213,38 @@ impl fmt::Display for TlsError {
                 write!(f, "Invalid handshake message: {desc}")
             }
             TlsError::InvalidFinished => {
-                write!(f, "Finished message verification failed: verify_data mismatch")
+                write!(
+                    f,
+                    "Finished message verification failed: verify_data mismatch"
+                )
+            }
+            TlsError::UnexpectedMessage {
+                expected,
+                received,
+                state,
+            } => {
+                write!(
+                    f,
+                    "Unexpected message '{}' in state '{}', expected state '{}'",
+                    received, state, expected
+                )
+            }
+            TlsError::InvalidState(desc) => {
+                write!(f, "Invalid state: {}", desc)
+            }
+            TlsError::MessageInWrongEncryptionState {
+                message,
+                expected_encryption,
+                actual_encryption,
+            } => {
+                write!(
+                    f,
+                    "Message '{}' in wrong encryption state: expected '{}', found '{}'",
+                    message, expected_encryption, actual_encryption
+                )
+            }
+            TlsError::HandshakeFailed(desc) => {
+                write!(f, "Handshake failed: {}", desc)
             }
         }
     }

@@ -602,6 +602,119 @@ let client_app_traffic = key_schedule
 
 **Files**: [src/key_schedule.rs](src/key_schedule.rs), [tests/key_schedule_tests.rs](tests/key_schedule_tests.rs)
 
+### Issue #19: Basic Handshake State Machine ✅
+**Goal**: Create a handshake state machine to manage TLS 1.3 handshake progress and enforce protocol correctness.
+
+**Implementation**:
+- **HandshakeState enum** - Tracks client position in TLS 1.3 handshake
+  - `Start` - Initial state, no messages sent or received
+  - `ClientHelloSent` - ClientHello has been sent
+  - `ServerHelloReceived` - ServerHello has been received and validated
+  - `EncryptedExtensionsReceived` - EncryptedExtensions has been received
+  - `CertificateReceived` - Certificate message has been received
+  - `CertificateVerifyReceived` - CertificateVerify message has been received
+  - `ServerFinishedReceived` - Server Finished message has been received and verified
+  - `ClientFinishedSent` - Client Finished message has been sent
+  - `Connected` - Handshake complete, ready for application data
+  - `Failed(String)` - Handshake failed with error description
+
+- **EncryptionState enum** - Tracks encryption requirements
+  - `Plaintext` - No encryption (ClientHello, ServerHello)
+  - `HandshakeEncryption` - Handshake encryption active (after ServerHello)
+  - `ApplicationEncryption` - Application encryption active (after Finished)
+
+- **TlsHandshake struct** - State machine implementation
+  - Enforces valid message ordering per RFC 8446 Section 2 & Appendix A
+  - Prevents out-of-order, duplicate, or unexpected messages
+  - Manages encryption state transitions automatically
+  - Blocks application data until handshake complete
+  - Fails closed on any protocol violation
+
+- **Transition Methods**:
+  - `on_client_hello_sent()` - Transition: Start → ClientHelloSent
+  - `on_server_hello_received()` - Transition: ClientHelloSent → ServerHelloReceived (enables handshake encryption)
+  - `on_encrypted_extensions_received()` - Transition: ServerHelloReceived → EncryptedExtensionsReceived
+  - `on_certificate_received()` - Transition: EncryptedExtensionsReceived → CertificateReceived
+  - `on_certificate_verify_received()` - Transition: CertificateReceived → CertificateVerifyReceived
+  - `on_server_finished_received()` - Transition: CertificateVerifyReceived → ServerFinishedReceived
+  - `on_client_finished_sent()` - Transition: ServerFinishedReceived → ClientFinishedSent (enables application encryption)
+  - `on_application_data_sent()` - Transition: ClientFinishedSent → Connected
+  - Each method validates current state before transitioning
+  - Returns `TlsError` for invalid transitions
+
+- **Query Methods**:
+  - `current_state()` - Get current handshake state
+  - `current_encryption_state()` - Get encryption state
+  - `is_handshake_complete()` - Check if ready for application data
+  - `is_failed()` - Check if state machine has failed
+  - `reset()` - Reset to Start state for new connection
+
+- **Error Handling** (new error variants):
+  - `UnexpectedMessage` - Wrong message type for current state (with expected state, received message, and current state)
+  - `InvalidState` - Invalid state for the requested operation
+  - `MessageInWrongEncryptionState` - Message received in wrong encryption state (with message type, expected encryption, and actual encryption)
+  - `HandshakeFailed` - Handshake failed with description
+
+**Testing**:
+- All valid state transitions in correct order
+- Invalid transitions (out-of-order messages)
+- Duplicate messages rejection
+- Encryption state transitions (Plaintext → HandshakeEncryption → ApplicationEncryption)
+- Failed state handling
+- Full handshake flow integration test
+- Application data blocked until handshake complete
+- Error message validation
+- State query methods
+- Reset functionality
+- Clone and equality tests
+
+**Security Features**:
+- Strict message ordering prevents downgrade attacks
+- Encryption state validation ensures proper protection
+- Fail-closed on any protocol violation (no recovery attempts)
+- Prevents application data before handshake complete
+- Prevents state confusion attacks
+- No automatic state recovery (explicit reset required)
+
+**Integration Points**:
+- Coordinates all handshake message handlers
+- Triggers key schedule updates (Issue #13)
+- Controls encryption/decryption activation
+- Uses all message parsers (Issues #5, #9, #11, #16, #17, #18)
+- Blocks application data until handshake complete
+
+**Usage Example**:
+```rust
+use tls_protocol::{TlsHandshake, EncryptionState};
+
+let mut handshake = TlsHandshake::new();
+
+// Send ClientHello
+handshake.on_client_hello_sent()?;
+
+// Receive ServerHello - encryption switches to handshake
+handshake.on_server_hello_received()?;
+assert_eq!(handshake.current_encryption_state(), 
+           EncryptionState::HandshakeEncryption);
+
+// Continue through handshake
+handshake.on_encrypted_extensions_received()?;
+handshake.on_certificate_received()?;
+handshake.on_certificate_verify_received()?;
+handshake.on_server_finished_received()?;
+
+// Send client Finished - encryption switches to application
+handshake.on_client_finished_sent()?;
+assert_eq!(handshake.current_encryption_state(), 
+           EncryptionState::ApplicationEncryption);
+
+// Ready for application data
+assert!(handshake.is_handshake_complete());
+handshake.on_application_data_sent()?;
+```
+
+**Files**: [src/handshake_state.rs](src/handshake_state.rs), [tests/handshake_state_tests.rs](tests/handshake_state_tests.rs), [src/error.rs](src/error.rs)
+
 ## Project Structure
 
 ```
@@ -616,6 +729,9 @@ tls-protocol/
 │   ├── client_hello.rs     # ClientHello message implementation
 │   ├── server_hello.rs     # ServerHello message parser
 │   ├── certificate.rs      # Certificate message parser
+│   ├── certificate_verify.rs # CertificateVerify message parser
+│   ├── finished.rs         # Finished message implementation
+│   ├── handshake_state.rs  # TLS 1.3 handshake state machine
 │   ├── x25519_key_exchange.rs # X25519 key exchange implementation
 │   ├── transcript_hash.rs  # Transcript hash manager (SHA-256)
 │   ├── key_schedule.rs     # HKDF-based key derivation pipeline
@@ -627,6 +743,9 @@ tls-protocol/
 │   ├── client_hello_tests.rs # ClientHello tests
 │   ├── server_hello_tests.rs # ServerHello parser tests
 │   ├── certificate_tests.rs # Certificate parser tests
+│   ├── certificate_verify_tests.rs # CertificateVerify tests
+│   ├── finished_tests.rs   # Finished message tests
+│   ├── handshake_state_tests.rs # Handshake state machine tests
 │   ├── extension_tests.rs  # Extension framework tests
 │   ├── x25519_key_exchange_tests.rs # X25519 key exchange tests
 │   ├── transcript_hash_tests.rs # Transcript hash tests
