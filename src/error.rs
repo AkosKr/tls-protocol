@@ -79,6 +79,11 @@ pub enum TlsError {
     /// Certificate parsing error
     /// Carries a description of the error.
     CertificateParsingError(String),
+    /// Invalid handshake message format
+    /// Carries a description of the error.
+    InvalidHandshakeMessage(String),
+    /// Finished message verification failed (verify_data mismatch)
+    InvalidFinished,
 }
 
 impl fmt::Display for TlsError {
@@ -183,6 +188,12 @@ impl fmt::Display for TlsError {
             }
             TlsError::CertificateParsingError(desc) => {
                 write!(f, "Certificate parsing error: {desc}")
+            }
+            TlsError::InvalidHandshakeMessage(desc) => {
+                write!(f, "Invalid handshake message: {desc}")
+            }
+            TlsError::InvalidFinished => {
+                write!(f, "Finished message verification failed: verify_data mismatch")
             }
         }
     }
