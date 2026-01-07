@@ -225,7 +225,9 @@ impl TlsHandshake {
     pub fn on_encrypted_extensions_received(&mut self) -> Result<(), TlsError> {
         match self.state {
             HandshakeState::ServerHelloReceived => {
-                // Validate encryption state
+                // Defensive check: Validate encryption state is correct for this message.
+                // This should always pass under normal operation since on_server_hello_received()
+                // sets HandshakeEncryption, but provides defense-in-depth against state corruption.
                 if self.encryption_state != EncryptionState::HandshakeEncryption {
                     let error = format!(
                         "EncryptedExtensions must be in HandshakeEncryption, found: {}",
@@ -262,7 +264,9 @@ impl TlsHandshake {
     pub fn on_certificate_received(&mut self) -> Result<(), TlsError> {
         match self.state {
             HandshakeState::EncryptedExtensionsReceived => {
-                // Validate encryption state
+                // Defensive check: Validate encryption state is correct for this message.
+                // This should always pass under normal operation since on_server_hello_received()
+                // sets HandshakeEncryption, but provides defense-in-depth against state corruption.
                 if self.encryption_state != EncryptionState::HandshakeEncryption {
                     let error = format!(
                         "Certificate must be in HandshakeEncryption, found: {}",
@@ -299,7 +303,9 @@ impl TlsHandshake {
     pub fn on_certificate_verify_received(&mut self) -> Result<(), TlsError> {
         match self.state {
             HandshakeState::CertificateReceived => {
-                // Validate encryption state
+                // Defensive check: Validate encryption state is correct for this message.
+                // This should always pass under normal operation since on_server_hello_received()
+                // sets HandshakeEncryption, but provides defense-in-depth against state corruption.
                 if self.encryption_state != EncryptionState::HandshakeEncryption {
                     let error = format!(
                         "CertificateVerify must be in HandshakeEncryption, found: {}",
@@ -336,7 +342,9 @@ impl TlsHandshake {
     pub fn on_server_finished_received(&mut self) -> Result<(), TlsError> {
         match self.state {
             HandshakeState::CertificateVerifyReceived => {
-                // Validate encryption state
+                // Defensive check: Validate encryption state is correct for this message.
+                // This should always pass under normal operation since on_server_hello_received()
+                // sets HandshakeEncryption, but provides defense-in-depth against state corruption.
                 if self.encryption_state != EncryptionState::HandshakeEncryption {
                     let error = format!(
                         "Server Finished must be in HandshakeEncryption, found: {}",
@@ -398,7 +406,9 @@ impl TlsHandshake {
     pub fn on_application_data_sent(&mut self) -> Result<(), TlsError> {
         match self.state {
             HandshakeState::ClientFinishedSent | HandshakeState::Connected => {
-                // Validate encryption state
+                // Defensive check: Validate encryption state is correct for this message.
+                // This should always pass under normal operation since on_client_finished_sent()
+                // sets ApplicationEncryption, but provides defense-in-depth against state corruption.
                 if self.encryption_state != EncryptionState::ApplicationEncryption {
                     let error = format!(
                         "ApplicationData must be in ApplicationEncryption, found: {}",
