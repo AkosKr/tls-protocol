@@ -233,7 +233,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         print_security("Plaintext bytes", message, 16);
 
         match client.send_application_data(message) {
-            Ok(_) => print_success("Encrypted and sent to server"),
+            Ok(_) => print_success("Plaintext encrypted by TLS and sent to server"),
             Err(e) => {
                 eprintln!("{}✗{} Failed to send: {:?}", "\x1b[31m", RESET, e);
                 break;
