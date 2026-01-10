@@ -1,82 +1,92 @@
-use tls_protocol::ContentType;
-use std::net::{TcpListener, TcpStream};
-use std::io::Read;
-use std::convert::TryFrom;
+//! TLS 1.3 Server Example
+//!
+//! This example demonstrates how to set up a TLS 1.3 server using the `TlsServer` struct.
+//!
+//! ⚠️ WARNING: This example uses placeholder credentials and will NOT complete a successful
+//! handshake with real clients. To run a working TLS server, you must:
+//! 1. Generate or obtain a valid X.509 certificate in DER format
+//! 2. Load the corresponding private key
+//! 3. Ensure the certificate's public key matches the private key
+//!
+//! Consider using a certificate generation library like `rcgen` or tools like OpenSSL
+//! to create proper certificates for testing.
 
-fn handle_client(mut stream: TcpStream) -> std::io::Result<()> {
-    let peer_addr = stream.peer_addr()?;
-    println!("Client connected from: {}", peer_addr);
+use std::net::TcpListener;
+use std::thread;
+
+use tls_protocol::{Certificate, CertificateEntry, PrivateKey, TlsServer};
+use rsa::RsaPrivateKey;
+
+fn handle_client(stream: std::net::TcpStream) -> Result<(), Box<dyn std::error::Error>> {
+    println!("New connection from: {}", stream.peer_addr()?);
+
+    // 1. Setup Server Credentials
+    // ⚠️ WARNING: This example uses placeholder credentials for demonstration purposes only.
+    // The dummy certificate does NOT match the generated private key and will fail
+    // signature verification on any real TLS client.
+    //
+    // For production use:
+    // - Load a valid X.509 DER certificate from disk (e.g., using std::fs::read)
+    // - Load the corresponding private key (e.g., from PEM using rsa::RsaPrivateKey::from_pkcs8_pem)
+    // - Or use a library like `rcgen` to generate self-signed certificates for testing
     
-    let mut buffer = vec![0u8; 4096];
-    
-    loop {
-        // Read at least the header (5 bytes)
-        let n = stream.read(&mut buffer)?;
-        if n == 0 {
-            println!("Client disconnected");
-            break;
+    // Generate a temporary RSA key for demonstration (2048 bits)
+    let mut rng = rand::rngs::OsRng;
+    let rsa_key = RsaPrivateKey::new(&mut rng, 2048)?;
+    let private_key = PrivateKey::Rsa(rsa_key);
+
+    // Dummy certificate (NOT VALID - for demonstration only)
+    let cert_data = vec![0u8; 100]; 
+    let certificate = Certificate::new(vec![], vec![CertificateEntry::new(cert_data, vec![])]);
+
+    // 2. Create TlsServer
+    let mut server = TlsServer::new(stream, certificate, private_key);
+
+    // 3. Perform Handshake
+    println!("Performing handshake...");
+    match server.perform_handshake() {
+        Ok(_) => println!("Handshake successful!"),
+        Err(e) => {
+            eprintln!("Handshake failed: {:?}", e);
+            return Ok(());
         }
-        
-        if n < 5 {
-            println!("Received incomplete record header ({} bytes)", n);
-            continue;
-        }
-        
-        // Parse the TLS record header
-        let content_type = ContentType::try_from(buffer[0])
-            .unwrap_or(ContentType::Invalid);
-        let version = ((buffer[1] as u16) << 8) | (buffer[2] as u16);
-        let length = ((buffer[3] as u16) << 8) | (buffer[4] as u16);
-        
-        println!("\n=== Received TLS Record ===");
-        println!("Content Type: {:?}", content_type);
-        println!("Version: 0x{:04x} (TLS {})", version, 
-            if version == 0x0303 { "1.2" } 
-            else if version == 0x0304 { "1.3" }
-            else { "unknown" });
-        println!("Payload Length: {} bytes", length);
-        
-        // Extract payload
-        let payload_end = (5 + length as usize).min(n);
-        let payload = &buffer[5..payload_end];
-        
-        println!("Payload (hex): {}", 
-            payload.iter()
-                .map(|b| format!("{:02x}", b))
-                .collect::<Vec<_>>()
-                .join(" "));
-        
-        // Try to display as string if it's printable
-        if let Ok(s) = std::str::from_utf8(payload) {
-            if s.chars().all(|c| c.is_ascii_graphic() || c.is_ascii_whitespace()) {
-                println!("Payload (text): \"{}\"", s);
-            }
-        }
-        println!("===========================\n");
     }
-    
+
+    // 4. Echo loop
+    loop {
+        match server.receive_application_data() {
+            Ok(data) => {
+                if data.is_empty() {
+                    break;
+                }
+                println!("Received: {}", String::from_utf8_lossy(&data));
+                server.send_application_data(&data)?;
+            }
+            Err(_) => break,
+        }
+    }
+
     Ok(())
 }
 
-fn main() -> std::io::Result<()> {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     let addr = "127.0.0.1:4433";
     let listener = TcpListener::bind(addr)?;
-    
-    println!("TLS server listening on {}", addr);
-    println!("Waiting for connections...\n");
-    
+
+    println!("TLS Server listening on {}", addr);
+
     for stream in listener.incoming() {
         match stream {
             Ok(stream) => {
-                if let Err(e) = handle_client(stream) {
-                    eprintln!("Error handling client: {}", e);
-                }
+                thread::spawn(move || {
+                    if let Err(e) = handle_client(stream) {
+                        eprintln!("Error handling connection: {}", e);
+                    }
+                });
             }
-            Err(e) => {
-                eprintln!("Connection failed: {}", e);
-            }
+            Err(e) => eprintln!("Connection failed: {}", e),
         }
     }
-    
+
     Ok(())
 }

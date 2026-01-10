@@ -1,3 +1,4 @@
+use crate::error::TlsError;
 use crate::extensions::{Extension, KeyShareEntry, TLS_VERSION_1_2, TLS_VERSION_1_3, NAMED_GROUP_X25519};
 
 /// TLS 1.3 cipher suites
@@ -143,6 +144,133 @@ impl ClientHello {
         message.extend_from_slice(&data);
         
         message
+    }
+    
+    /// Parse a ClientHello message from bytes
+    ///
+    /// Expected format:
+    /// - Handshake type (1 byte): 0x01 (ClientHello)
+    /// - Length (3 bytes): Total length of ClientHello data
+    /// - Legacy version (2 bytes): 0x0303
+    /// - Random (32 bytes)
+    /// - Legacy session ID length (1 byte)
+    /// - Legacy session ID (variable)
+    /// - Cipher suites length (2 bytes)
+    /// - Cipher suites (variable)
+    /// - Legacy compression methods length (1 byte)
+    /// - Legacy compression methods (variable)
+    /// - Extensions length (2 bytes)
+    /// - Extensions (variable)
+    pub fn from_bytes(data: &[u8]) -> Result<Self, TlsError> {
+        let mut offset = 0;
+
+        // Check minimum length (1+3+2+32+1+0+2+2+1+1+2 = 47 bytes minimum)
+        if data.len() < 47 {
+            return Err(TlsError::IncompleteData);
+        }
+
+        // Handshake type
+        let handshake_type = data[offset];
+        offset += 1;
+        if handshake_type != 0x01 {
+            return Err(TlsError::InvalidHandshakeType(handshake_type));
+        }
+
+        // Length
+        let length = ((data[offset] as usize) << 16)
+            | ((data[offset + 1] as usize) << 8)
+            | (data[offset + 2] as usize);
+        offset += 3;
+
+        if data.len() < offset + length {
+            return Err(TlsError::IncompleteData);
+        }
+
+        // Legacy version
+        let legacy_version = ((data[offset] as u16) << 8) | (data[offset + 1] as u16);
+        offset += 2;
+        if legacy_version != TLS_VERSION_1_2 {
+            // Validating legacy_version is technically optional but robust
+            // RFC says legacy_version MUST be 0x0303
+            return Err(TlsError::InvalidVersion(legacy_version));
+        }
+
+        // Random
+        let mut random = [0u8; 32];
+        random.copy_from_slice(&data[offset..offset + 32]);
+        offset += 32;
+
+        // Legacy session ID
+        let session_id_len = data[offset] as usize;
+        offset += 1;
+        if offset + session_id_len > data.len() {
+            return Err(TlsError::IncompleteData);
+        }
+        let legacy_session_id = data[offset..offset + session_id_len].to_vec();
+        offset += session_id_len;
+
+        // Cipher suites
+        if offset + 2 > data.len() {
+            return Err(TlsError::IncompleteData);
+        }
+        let cipher_suites_len = ((data[offset] as usize) << 8) | (data[offset + 1] as usize);
+        offset += 2;
+        
+        if offset + cipher_suites_len > data.len() {
+            return Err(TlsError::IncompleteData);
+        }
+        
+        if cipher_suites_len % 2 != 0 {
+            return Err(TlsError::IncompleteData);
+        }
+        
+        let mut cipher_suites = Vec::new();
+        for i in (0..cipher_suites_len).step_by(2) {
+             let suite = ((data[offset + i] as u16) << 8) | (data[offset + i + 1] as u16);
+             cipher_suites.push(suite);
+        }
+        offset += cipher_suites_len;
+
+        // Check intersection with supported suites?
+        // For now, we just parse what's there.
+
+        // Compression methods
+        if offset + 1 > data.len() {
+            return Err(TlsError::IncompleteData);
+        }
+        let compression_methods_len = data[offset] as usize;
+        offset += 1;
+        if offset + compression_methods_len > data.len() {
+            return Err(TlsError::IncompleteData);
+        }
+        // We typically expect 0x00 (null compression), but we just skip over it
+        offset += compression_methods_len;
+
+        // Extensions
+        if offset + 2 > data.len() {
+            // Extensions can be omitted (e.g. TLS 1.2), but for TLS 1.3 they are mandatory
+            // If message ends here, extensions vector is empty
+             return Ok(Self::new(random, legacy_session_id, cipher_suites, Vec::new()));
+        }
+        
+        let extensions_len = ((data[offset] as usize) << 8) | (data[offset + 1] as usize);
+        offset += 2;
+        
+        if offset + extensions_len > data.len() {
+            return Err(TlsError::IncompleteData);
+        }
+        
+        let mut extensions = Vec::new();
+        let extensions_end = offset + extensions_len;
+        let mut ext_offset = offset;
+        
+        while ext_offset < extensions_end {
+            let (ext, consumed) = Extension::from_bytes(&data[ext_offset..extensions_end])?;
+            extensions.push(ext);
+            ext_offset += consumed;
+        }
+
+        Ok(Self::new(random, legacy_session_id, cipher_suites, extensions))
     }
     
     /// Generate random bytes (helper method for testing)

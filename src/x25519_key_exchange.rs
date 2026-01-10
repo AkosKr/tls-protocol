@@ -83,9 +83,7 @@ pub fn compute_shared_secret(
 
 /// Parse and validate X25519 public key from KeyShareEntry.
 /// Validates named group, key length, and rejects weak/invalid keys.
-pub fn parse_key_share_entry(
-    key_share: &KeyShareEntry,
-) -> Result<[u8; X25519_KEY_SIZE], TlsError> {
+pub fn parse_key_share_entry(key_share: &KeyShareEntry) -> Result<[u8; X25519_KEY_SIZE], TlsError> {
     // Validate named group
     if key_share.group != NAMED_GROUP_X25519 {
         return Err(TlsError::KeyExchangeFailed(format!(
@@ -134,7 +132,7 @@ mod tests {
     fn test_public_key_not_all_zeros() {
         let keypair = X25519KeyPair::generate();
         let public_key = keypair.public_key_bytes();
-        
+
         // Public key should not be all zeros
         assert!(public_key.iter().any(|&b| b != 0));
     }
@@ -166,7 +164,7 @@ mod tests {
     fn test_reject_all_zero_public_key() {
         let zero_key = [0u8; X25519_KEY_SIZE];
         let result = validate_public_key(&zero_key);
-        
+
         assert!(result.is_err());
         assert_eq!(result.unwrap_err(), TlsError::InvalidPublicKey);
     }

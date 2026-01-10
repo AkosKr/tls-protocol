@@ -35,12 +35,14 @@ use crate::extensions::{
 };
 
 use p256::ecdsa::{
-    signature::Verifier, Signature as P256Signature, VerifyingKey as P256VerifyingKey,
+    signature::{Signer, Verifier},
+    Signature as P256Signature, SigningKey as P256SigningKey, VerifyingKey as P256VerifyingKey,
 };
 use p384::ecdsa::{
-    Signature as P384Signature, VerifyingKey as P384VerifyingKey,
+    Signature as P384Signature, SigningKey as P384SigningKey, VerifyingKey as P384VerifyingKey,
 };
-use rsa::RsaPublicKey;
+use rsa::signature::{RandomizedSigner, SignatureEncoding};
+use rsa::{RsaPrivateKey, RsaPublicKey};
 use sha2::{Digest, Sha256, Sha384};
 use x509_parser::der_parser::asn1_rs::Oid;
 use x509_parser::der_parser::oid;
@@ -71,6 +73,17 @@ pub enum PublicKey {
     EcdsaP384(P384VerifyingKey),
 }
 
+/// Private key types for signing
+#[derive(Debug, Clone)]
+pub enum PrivateKey {
+    /// RSA private key
+    Rsa(RsaPrivateKey),
+    /// ECDSA private key on P-256 curve
+    EcdsaP256(P256SigningKey),
+    /// ECDSA private key on P-384 curve
+    EcdsaP384(P384SigningKey),
+}
+
 /// CertificateVerify handshake message (RFC 8446, Section 4.4.3)
 ///
 /// This message is used to prove possession of the private key corresponding
@@ -90,6 +103,47 @@ impl CertificateVerify {
         Self {
             algorithm,
             signature,
+        }
+    }
+
+    /// Sign the transcript hash with the given private key
+    ///
+    /// # Arguments
+    /// * `private_key` - Key to sign with
+    /// * `transcript_hash` - Current transcript hash
+    /// * `context` - Context string (client or server)
+    pub fn sign(
+        private_key: &PrivateKey,
+        transcript_hash: &[u8; 32],
+        context: &str,
+    ) -> Result<Self, TlsError> {
+        let signed_content = build_signed_content(transcript_hash, context);
+        let mut rng = rand::rngs::OsRng;
+
+        match private_key {
+            PrivateKey::Rsa(key) => {
+                // Use RSA-PSS with SHA-256 (defaulting to 0x0804)
+                // In a real implementation we should check key size and select appropriate algorithm
+                let signing_key = rsa::pss::SigningKey::<Sha256>::new(key.clone());
+                let signature = signing_key
+                    .sign_with_rng(&mut rng, &signed_content)
+                    .to_vec();
+                Ok(Self::new(SIG_RSA_PSS_RSAE_SHA256, signature))
+            }
+            PrivateKey::EcdsaP256(key) => {
+                let signature: P256Signature = key.sign(&signed_content);
+                Ok(Self::new(
+                    SIG_ECDSA_SECP256R1_SHA256,
+                    signature.to_der().as_bytes().to_vec(),
+                ))
+            }
+            PrivateKey::EcdsaP384(key) => {
+                let signature: P384Signature = key.sign(&signed_content);
+                Ok(Self::new(
+                    SIG_ECDSA_SECP384R1_SHA384,
+                    signature.to_der().as_bytes().to_vec(),
+                ))
+            }
         }
     }
 

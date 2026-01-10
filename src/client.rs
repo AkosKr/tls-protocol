@@ -206,22 +206,28 @@ impl TlsClient {
         payload: &[u8],
         content_type: ContentType,
     ) -> Result<(), TlsError> {
-        // encrypt_record constructs TLSInnerPlaintext internally
+        // Calculate the length of the ciphertext before encryption
+        // ciphertext_len = inner_plaintext_len + TAG_SIZE
+        // inner_plaintext_len = payload_len + 1 (content_type) + padding_len
+        let padding_len = 0;
+        let inner_plaintext_len = payload.len() + 1 + padding_len;
+        let ciphertext_len = inner_plaintext_len + crate::aead::TAG_SIZE;
+
+        // Construct the header with the ciphertext length
+        let header = RecordHeader::new(ContentType::ApplicationData, 0x0303, ciphertext_len as u16);
+        let header_bytes = header.to_bytes();
+
+        // Encrypt using the full header (including length) as AAD
         let ciphertext = encrypt_record(
             cipher,
             payload,
             content_type as u8,
-            &[0x17, 0x03, 0x03], // AAD: ApplicationData type + version
-            0,                   // No padding
+            &header_bytes,
+            padding_len,
         )?;
 
-        // Construct record header for ApplicationData (encrypted records)
-        let header = RecordHeader::new(
-            ContentType::ApplicationData,
-            0x0303,
-            ciphertext.len() as u16,
-        );
-        let header_bytes = header.to_bytes();
+        // Verify the ciphertext length matches our calculation
+        debug_assert_eq!(ciphertext.len(), ciphertext_len);
 
         stream
             .write_all(&header_bytes)
