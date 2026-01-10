@@ -225,6 +225,14 @@ impl ClientHello {
             return Err(TlsError::IncompleteData);
         }
         
+        if cipher_suites_len % 2 != 0 {
+            println!(
+                "CH parse error: CipherSuites length is not even. Len {}",
+                cipher_suites_len
+            );
+            return Err(TlsError::IncompleteData);
+        }
+        
         let mut cipher_suites = Vec::new();
         for i in (0..cipher_suites_len).step_by(2) {
              let suite = ((data[offset + i] as u16) << 8) | (data[offset + i + 1] as u16);
