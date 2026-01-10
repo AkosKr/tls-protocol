@@ -301,10 +301,7 @@ impl TlsServer {
 
         let server_hello =
             ServerHello::new(random, legacy_session_id_echo, cipher_suite, extensions);
-        let server_hello_bytes = server_hello.to_bytes(); // NOTE: ServerHello to_bytes not implemented in context?
-                                                          // Checking `server_hello.rs`: It has `from_bytes` but NOT `to_bytes` visible in the snippet I read?
-                                                          // Wait, `ClientHello` has `to_bytes`. `ServerHello` probably should.
-                                                          // I need to check `server_hello.rs` fully.
+        let server_hello_bytes = server_hello.to_bytes();
 
         self.send_handshake_message(&server_hello_bytes)?;
         self.transcript.update(&server_hello_bytes);
