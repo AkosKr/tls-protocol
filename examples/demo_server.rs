@@ -77,11 +77,11 @@ fn handle_client(stream: std::net::TcpStream) -> Result<(), Box<dyn std::error::
             print_warning(&format!("Could not load TLS certificate from '{}'.", cert_path));
             print_warning("This TLS demo server cannot run without a valid certificate.");
             print_warning("Generate a demo certificate by running:");
-            print_warning("  cargo run --example generate_demo_cert");
+            print_warning("  ./generate_demo_cert.sh");
             return Err(std::io::Error::new(
                 std::io::ErrorKind::Other,
                 format!(
-                    "Missing TLS certificate: '{}'. Generate it with `cargo run --example generate_demo_cert` and rerun the demo.",
+                    "Missing TLS certificate: '{}'. Generate it with `./generate_demo_cert.sh` and rerun the demo.",
                     cert_path
                 ),
             ).into());
