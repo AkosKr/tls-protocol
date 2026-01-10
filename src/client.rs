@@ -139,6 +139,21 @@ impl TlsClient {
         self.handshake.is_handshake_complete()
     }
 
+    /// Helper method to decrypt a record using the given cipher
+    fn decrypt_with_cipher(
+        cipher: &mut AeadCipher,
+        payload: &[u8],
+        header_bytes: &[u8],
+    ) -> Result<(ContentType, Vec<u8>), TlsError> {
+        // decrypt_record returns (content, content_type)
+        let (content, content_type_byte) = decrypt_record(cipher, payload, header_bytes)?;
+
+        let real_content_type = ContentType::try_from(content_type_byte)
+            .map_err(|_| TlsError::InvalidContentType(content_type_byte))?;
+
+        Ok((real_content_type, content))
+    }
+
     /// Read a TLS record from the stream
     ///
     /// Reads the record header, then the payload, and decrypts if necessary
@@ -172,30 +187,53 @@ impl TlsClient {
                 let cipher = self.server_handshake_keys.as_mut().ok_or_else(|| {
                     TlsError::InvalidState("No handshake keys available".to_string())
                 })?;
-
-                // decrypt_record returns (content, content_type)
-                let (content, content_type_byte) = decrypt_record(cipher, &payload, &header_bytes)?;
-
-                let real_content_type = ContentType::try_from(content_type_byte)
-                    .map_err(|_| TlsError::InvalidContentType(content_type_byte))?;
-
-                Ok((real_content_type, content))
+                Self::decrypt_with_cipher(cipher, &payload, &header_bytes)
             }
             EncryptionState::ApplicationEncryption => {
                 // Decrypt using application keys
                 let cipher = self.server_application_keys.as_mut().ok_or_else(|| {
                     TlsError::InvalidState("No application keys available".to_string())
                 })?;
-
-                // decrypt_record returns (content, content_type)
-                let (content, content_type_byte) = decrypt_record(cipher, &payload, &header_bytes)?;
-
-                let real_content_type = ContentType::try_from(content_type_byte)
-                    .map_err(|_| TlsError::InvalidContentType(content_type_byte))?;
-
-                Ok((real_content_type, content))
+                Self::decrypt_with_cipher(cipher, &payload, &header_bytes)
             }
         }
+    }
+
+    /// Helper method to encrypt and send a record using the given cipher
+    fn encrypt_and_send_with_cipher(
+        stream: &mut TcpStream,
+        cipher: &mut AeadCipher,
+        payload: &[u8],
+        content_type: ContentType,
+    ) -> Result<(), TlsError> {
+        // encrypt_record constructs TLSInnerPlaintext internally
+        let ciphertext = encrypt_record(
+            cipher,
+            payload,
+            content_type as u8,
+            &[0x17, 0x03, 0x03], // AAD: ApplicationData type + version
+            0,                   // No padding
+        )?;
+
+        // Construct record header for ApplicationData (encrypted records)
+        let header = RecordHeader::new(
+            ContentType::ApplicationData,
+            0x0303,
+            ciphertext.len() as u16,
+        );
+        let header_bytes = header.to_bytes();
+
+        stream
+            .write_all(&header_bytes)
+            .map_err(|e| TlsError::InvalidState(format!("IO error: {}", e)))?;
+        stream
+            .write_all(&ciphertext)
+            .map_err(|e| TlsError::InvalidState(format!("IO error: {}", e)))?;
+        stream
+            .flush()
+            .map_err(|e| TlsError::InvalidState(format!("IO error: {}", e)))?;
+
+        Ok(())
     }
 
     /// Write a TLS record to the stream
@@ -227,70 +265,14 @@ impl TlsClient {
                 let cipher = self.client_handshake_keys.as_mut().ok_or_else(|| {
                     TlsError::InvalidState("No handshake keys available".to_string())
                 })?;
-
-                // encrypt_record constructs TLSInnerPlaintext internally
-                let ciphertext = encrypt_record(
-                    cipher,
-                    payload,
-                    content_type as u8,
-                    &[0x17, 0x03, 0x03], // AAD: ApplicationData type + version
-                    0,                   // No padding
-                )?;
-
-                // Construct record header for ApplicationData (encrypted records)
-                let header = RecordHeader::new(
-                    ContentType::ApplicationData,
-                    0x0303,
-                    ciphertext.len() as u16,
-                );
-                let header_bytes = header.to_bytes();
-
-                self.stream
-                    .write_all(&header_bytes)
-                    .map_err(|e| TlsError::InvalidState(format!("IO error: {}", e)))?;
-                self.stream
-                    .write_all(&ciphertext)
-                    .map_err(|e| TlsError::InvalidState(format!("IO error: {}", e)))?;
-                self.stream
-                    .flush()
-                    .map_err(|e| TlsError::InvalidState(format!("IO error: {}", e)))?;
-
-                Ok(())
+                Self::encrypt_and_send_with_cipher(&mut self.stream, cipher, payload, content_type)
             }
             EncryptionState::ApplicationEncryption => {
                 // Encrypt using application keys
                 let cipher = self.client_application_keys.as_mut().ok_or_else(|| {
                     TlsError::InvalidState("No application keys available".to_string())
                 })?;
-
-                // encrypt_record constructs TLSInnerPlaintext internally
-                let ciphertext = encrypt_record(
-                    cipher,
-                    payload,
-                    content_type as u8,
-                    &[0x17, 0x03, 0x03], // AAD: ApplicationData type + version
-                    0,                   // No padding
-                )?;
-
-                // Construct record header for ApplicationData (encrypted records)
-                let header = RecordHeader::new(
-                    ContentType::ApplicationData,
-                    0x0303,
-                    ciphertext.len() as u16,
-                );
-                let header_bytes = header.to_bytes();
-
-                self.stream
-                    .write_all(&header_bytes)
-                    .map_err(|e| TlsError::InvalidState(format!("IO error: {}", e)))?;
-                self.stream
-                    .write_all(&ciphertext)
-                    .map_err(|e| TlsError::InvalidState(format!("IO error: {}", e)))?;
-                self.stream
-                    .flush()
-                    .map_err(|e| TlsError::InvalidState(format!("IO error: {}", e)))?;
-
-                Ok(())
+                Self::encrypt_and_send_with_cipher(&mut self.stream, cipher, payload, content_type)
             }
         }
     }
