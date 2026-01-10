@@ -341,7 +341,7 @@ Detailed stream view:
 - ✅ No ChangeCipherSpec (or it's ignored)
 
 **TLS 1.2 characteristics**:
-- Version 0x0303 means TLS 1.2
+- Uses protocol version 0x0303 for TLS 1.2 (TLS 1.3 also reuses 0x0303 in record headers for compatibility, but advertises 0x0304 in the `supported_versions` extension)
 - Handshake messages visible (Certificate, ServerKeyExchange, etc.)
 - ChangeCipherSpec used for encryption transition
 - 2-RTT handshake
