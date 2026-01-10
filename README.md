@@ -774,17 +774,19 @@ handshake.on_application_data_sent()?;
   
   - `receive_certificate()` - Process server certificate chain
     - Receives and decrypts certificate message
-    - Parses and validates certificate structure
-    - Returns Certificate for verification
+    - Parses certificate structure
+    - Returns Certificate for inspection
     - Updates transcript hash
     - Advances state to CertificateReceived
+    - ⚠️ **Note**: Does NOT validate certificate chain or hostname
   
-  - `receive_certificate_verify()` - Verify server authentication
+  - `receive_certificate_verify()` - Verify cryptographic proof of private key
     - Receives and decrypts CertificateVerify message
     - Extracts end-entity certificate
-    - Verifies signature proves server has private key
+    - Verifies signature proves server controls the certificate's private key
     - Updates transcript hash
     - Advances state to CertificateVerifyReceived
+    - ⚠️ **Note**: Does NOT validate certificate chain against trust store or verify hostname/SAN matching
   
   - `receive_server_finished()` - Verify server handshake
     - Receives and decrypts server Finished message
@@ -823,13 +825,20 @@ handshake.on_application_data_sent()?;
 **Security Features**:
 - Strict handshake state enforcement via TlsHandshake
 - Automatic encryption state management (plaintext → handshake → application)
-- Proper AEAD nonce construction with sequence numbers
-- Sequence number tracking prevents replay attacks
+- Proper AEAD nonce construction with internal sequence number management
 - Downgrade protection detection
-- Certificate signature verification
+- Certificate signature verification (cryptographic proof of private key possession)
 - Finished message HMAC verification
 - Blocks application data until handshake complete
 - Secure key material handling (zeroization via existing types)
+
+⚠️ **SECURITY WARNING**: This implementation does NOT perform full certificate validation:
+- Does NOT validate certificate chains against a trust store
+- Does NOT verify certificate expiration dates
+- Does NOT enforce hostname/SAN matching
+- Does NOT check certificate revocation status
+
+**This client is NOT secure against active man-in-the-middle attacks. An attacker can present a self-signed certificate and successfully intercept connections.** This implementation is for educational purposes and protocol demonstration only. Do NOT use in production or security-critical applications without implementing proper certificate validation.
 
 **Integration Points**:
 - ✅ Uses `std::net::TcpStream` directly for TCP connection
@@ -846,6 +855,8 @@ handshake.on_application_data_sent()?;
 - ✅ Uses existing error types and extensions framework
 
 **Usage Examples**:
+
+⚠️ **WARNING**: These examples demonstrate protocol functionality but are NOT secure for production use. See Security Warning above.
 
 *High-Level API (Automatic Handshake)*:
 ```rust
