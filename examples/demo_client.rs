@@ -124,6 +124,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             print_info("Details", "Negotiated X25519 ECDHE");
             print_info("Details", "Computing shared secret");
             print_info("Details", "Deriving handshake traffic keys");
+            print_info(
+                "Encryption",
+                "Switched to handshake encryption (AES-128-GCM)",
+            );
         }
         Err(e) => {
             eprintln!("{}✗{} Failed: {:?}", "\x1b[31m", RESET, e);
@@ -137,7 +141,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             print_success("EncryptedExtensions received and decrypted");
             print_info(
                 "Encryption",
-                "Switched to handshake encryption (AES-128-GCM)",
+                "Message encrypted with handshake keys (AES-128-GCM)",
             );
         }
         Err(e) => {
