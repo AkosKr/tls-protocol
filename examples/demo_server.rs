@@ -143,8 +143,8 @@ fn handle_client(stream: std::net::TcpStream) -> Result<(), Box<dyn std::error::
                 message_count += 1;
                 print_header(&format!("Message #{}", message_count));
                 
-                // Show encrypted wire format (would need access to raw bytes)
-                print_security("Encrypted wire format", &data, 16);
+                // Show received application data in hex (data is already decrypted)
+                print_security("Application data (hex)", &data, 16);
                 
                 // Show decrypted content
                 match String::from_utf8(data.clone()) {
