@@ -907,6 +907,31 @@ client.send_application_data(b"Hello, TLS 1.3!")?;
 
 **Files**: [src/client.rs](src/client.rs), [examples/tls_client.rs](examples/tls_client.rs)
 
+### Issue #47: TLS Server Implementation ✅
+**Goal**: Implement a functional TLS 1.3 server capable of performing a full handshake and exchanging application data.
+
+**Implementation**:
+- **TlsServer struct** - Complete TLS 1.3 server implementation
+  - Manages `TcpStream` for server-side connection
+  - Manages server certificate and private key for authentication
+  - Implements full server-side handshake state machine
+  
+- **Handshake Flow**:
+  - `receive_client_hello()`: Process ClientHello, extract keys, compute shared secret
+  - `send_server_hello()`: Send ServerHello, establish handshake keys
+  - `send_encrypted_extensions()`: Send encrypted extensions
+  - `send_certificate()`: Send server certificate chain
+  - `send_certificate_verify()`: Sign transcript hash to prove identity
+  - `send_server_finished()`: Send Finished message
+  - `receive_client_finished()`: Validate client Finished, switch to application keys
+
+- **Extensions**:
+  - Enhanced `HandshakeState` to support server states
+  - Enhanced `CertificateVerify` to support signing (RSA/ECDSA)
+
+**Files**: [src/server.rs](src/server.rs), [src/handshake_state.rs](src/handshake_state.rs), [src/certificate_verify.rs](src/certificate_verify.rs)
+
+
 ## Project Structure
 
 ```

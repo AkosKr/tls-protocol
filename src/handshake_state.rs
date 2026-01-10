@@ -60,6 +60,8 @@ use crate::error::TlsError;
 pub enum HandshakeState {
     /// Initial state - no messages sent or received
     Start,
+
+    // --- Client States ---
     /// ClientHello has been sent
     ClientHelloSent,
     /// ServerHello has been received and validated
@@ -74,6 +76,23 @@ pub enum HandshakeState {
     ServerFinishedReceived,
     /// Client Finished message has been sent
     ClientFinishedSent,
+
+    // --- Server States ---
+    /// ClientHello has been received
+    ClientHelloReceived,
+    /// ServerHello has been sent
+    ServerHelloSent,
+    /// EncryptedExtensions has been sent
+    EncryptedExtensionsSent,
+    /// Certificate message has been sent
+    CertificateSent,
+    /// CertificateVerify message has been sent
+    CertificateVerifySent,
+    /// Server Finished message has been sent
+    ServerFinishedSent,
+    /// Client Finished message has been received
+    ClientFinishedReceived,
+
     /// Handshake complete, ready for application data
     Connected,
     /// Handshake failed with error description
@@ -85,6 +104,7 @@ impl HandshakeState {
     pub fn as_str(&self) -> &str {
         match self {
             HandshakeState::Start => "Start",
+            // Client states
             HandshakeState::ClientHelloSent => "ClientHelloSent",
             HandshakeState::ServerHelloReceived => "ServerHelloReceived",
             HandshakeState::EncryptedExtensionsReceived => "EncryptedExtensionsReceived",
@@ -92,6 +112,15 @@ impl HandshakeState {
             HandshakeState::CertificateVerifyReceived => "CertificateVerifyReceived",
             HandshakeState::ServerFinishedReceived => "ServerFinishedReceived",
             HandshakeState::ClientFinishedSent => "ClientFinishedSent",
+            // Server states
+            HandshakeState::ClientHelloReceived => "ClientHelloReceived",
+            HandshakeState::ServerHelloSent => "ServerHelloSent",
+            HandshakeState::EncryptedExtensionsSent => "EncryptedExtensionsSent",
+            HandshakeState::CertificateSent => "CertificateSent",
+            HandshakeState::CertificateVerifySent => "CertificateVerifySent",
+            HandshakeState::ServerFinishedSent => "ServerFinishedSent",
+            HandshakeState::ClientFinishedReceived => "ClientFinishedReceived",
+
             HandshakeState::Connected => "Connected",
             HandshakeState::Failed(_) => "Failed",
         }
@@ -155,7 +184,9 @@ impl TlsHandshake {
     pub fn is_handshake_complete(&self) -> bool {
         matches!(
             self.state,
-            HandshakeState::ClientFinishedSent | HandshakeState::Connected
+            HandshakeState::ClientFinishedSent
+                | HandshakeState::ClientFinishedReceived
+                | HandshakeState::Connected
         )
     }
 
@@ -402,10 +433,12 @@ impl TlsHandshake {
 
     /// Transition to Connected state (ready for application data)
     ///
-    /// Valid from: ClientFinishedSent
+    /// Valid from: ClientFinishedSent or ClientFinishedReceived
     pub fn on_application_data_sent(&mut self) -> Result<(), TlsError> {
         match self.state {
-            HandshakeState::ClientFinishedSent | HandshakeState::Connected => {
+            HandshakeState::ClientFinishedSent
+            | HandshakeState::ClientFinishedReceived
+            | HandshakeState::Connected => {
                 // Defensive check: Validate encryption state is correct for this message.
                 // This should always pass under normal operation since `on_client_finished_sent()`
                 // sets ApplicationEncryption, but provides defense-in-depth against state corruption.
@@ -433,6 +466,176 @@ impl TlsHandshake {
                 Err(TlsError::HandshakeFailed(
                     "Application data sent before handshake complete".to_string(),
                 ))
+            }
+        }
+    }
+
+    /// Transition to ClientHelloReceived state
+    ///
+    /// Valid from: Start
+    pub fn on_client_hello_received(&mut self) -> Result<(), TlsError> {
+        match self.state {
+            HandshakeState::Start => {
+                self.state = HandshakeState::ClientHelloReceived;
+                Ok(())
+            }
+            _ => {
+                let error = format!(
+                    "Cannot receive ClientHello from state: {}",
+                    self.state.as_str()
+                );
+                self.state = HandshakeState::Failed(error.clone());
+                Err(TlsError::UnexpectedMessage {
+                    expected: "Start".to_string(),
+                    received: "ClientHello".to_string(),
+                    state: self.state.as_str().to_string(),
+                })
+            }
+        }
+    }
+
+    /// Transition to ServerHelloSent state and enable handshake encryption
+    ///
+    /// Valid from: ClientHelloReceived
+    pub fn on_server_hello_sent(&mut self) -> Result<(), TlsError> {
+        match self.state {
+            HandshakeState::ClientHelloReceived => {
+                self.state = HandshakeState::ServerHelloSent;
+                self.encryption_state = EncryptionState::HandshakeEncryption;
+                Ok(())
+            }
+            _ => {
+                let error = format!(
+                    "Cannot send ServerHello from state: {}",
+                    self.state.as_str()
+                );
+                self.state = HandshakeState::Failed(error.clone());
+                Err(TlsError::UnexpectedMessage {
+                    expected: "ClientHelloReceived".to_string(),
+                    received: "ServerHello".to_string(),
+                    state: self.state.as_str().to_string(),
+                })
+            }
+        }
+    }
+
+    /// Transition to EncryptedExtensionsSent state
+    ///
+    /// Valid from: ServerHelloSent
+    pub fn on_encrypted_extensions_sent(&mut self) -> Result<(), TlsError> {
+        match self.state {
+            HandshakeState::ServerHelloSent => {
+                self.state = HandshakeState::EncryptedExtensionsSent;
+                Ok(())
+            }
+            _ => {
+                let error = format!(
+                    "Cannot send EncryptedExtensions from state: {}",
+                    self.state.as_str()
+                );
+                self.state = HandshakeState::Failed(error.clone());
+                Err(TlsError::UnexpectedMessage {
+                    expected: "ServerHelloSent".to_string(),
+                    received: "EncryptedExtensions".to_string(),
+                    state: self.state.as_str().to_string(),
+                })
+            }
+        }
+    }
+
+    /// Transition to CertificateSent state
+    ///
+    /// Valid from: EncryptedExtensionsSent
+    pub fn on_certificate_sent(&mut self) -> Result<(), TlsError> {
+        match self.state {
+            HandshakeState::EncryptedExtensionsSent => {
+                self.state = HandshakeState::CertificateSent;
+                Ok(())
+            }
+            _ => {
+                let error = format!(
+                    "Cannot send Certificate from state: {}",
+                    self.state.as_str()
+                );
+                self.state = HandshakeState::Failed(error.clone());
+                Err(TlsError::UnexpectedMessage {
+                    expected: "EncryptedExtensionsSent".to_string(),
+                    received: "Certificate".to_string(),
+                    state: self.state.as_str().to_string(),
+                })
+            }
+        }
+    }
+
+    /// Transition to CertificateVerifySent state
+    ///
+    /// Valid from: CertificateSent
+    pub fn on_certificate_verify_sent(&mut self) -> Result<(), TlsError> {
+        match self.state {
+            HandshakeState::CertificateSent => {
+                self.state = HandshakeState::CertificateVerifySent;
+                Ok(())
+            }
+            _ => {
+                let error = format!(
+                    "Cannot send CertificateVerify from state: {}",
+                    self.state.as_str()
+                );
+                self.state = HandshakeState::Failed(error.clone());
+                Err(TlsError::UnexpectedMessage {
+                    expected: "CertificateSent".to_string(),
+                    received: "CertificateVerify".to_string(),
+                    state: self.state.as_str().to_string(),
+                })
+            }
+        }
+    }
+
+    /// Transition to ServerFinishedSent state
+    ///
+    /// Valid from: CertificateVerifySent
+    pub fn on_server_finished_sent(&mut self) -> Result<(), TlsError> {
+        match self.state {
+            HandshakeState::CertificateVerifySent => {
+                self.state = HandshakeState::ServerFinishedSent;
+                Ok(())
+            }
+            _ => {
+                let error = format!(
+                    "Cannot send Server Finished from state: {}",
+                    self.state.as_str()
+                );
+                self.state = HandshakeState::Failed(error.clone());
+                Err(TlsError::UnexpectedMessage {
+                    expected: "CertificateVerifySent".to_string(),
+                    received: "ServerFinished".to_string(),
+                    state: self.state.as_str().to_string(),
+                })
+            }
+        }
+    }
+
+    /// Transition to ClientFinishedReceived state and enable application encryption
+    ///
+    /// Valid from: ServerFinishedSent
+    pub fn on_client_finished_received(&mut self) -> Result<(), TlsError> {
+        match self.state {
+            HandshakeState::ServerFinishedSent => {
+                self.state = HandshakeState::ClientFinishedReceived;
+                self.encryption_state = EncryptionState::ApplicationEncryption;
+                Ok(())
+            }
+            _ => {
+                let error = format!(
+                    "Cannot receive Client Finished from state: {}",
+                    self.state.as_str()
+                );
+                self.state = HandshakeState::Failed(error.clone());
+                Err(TlsError::UnexpectedMessage {
+                    expected: "ServerFinishedSent".to_string(),
+                    received: "ClientFinished".to_string(),
+                    state: self.state.as_str().to_string(),
+                })
             }
         }
     }
