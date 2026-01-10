@@ -355,25 +355,6 @@ impl TlsServer {
 
     /// Step 4: Send Certificate
     pub fn send_certificate(&mut self) -> Result<(), TlsError> {
-        // We need to serialize `self.certificate`.
-        // `Certificate` struct likely has `to_bytes` or similar logic?
-        // `src/certificate.rs` has `from_bytes`. Does it have `to_bytes`?
-        // I need to check or implement it.
-        // Assuming it does (since ClientHello uses Extension::serialize which often matches).
-        // Let's check `src/certificate.rs` again.
-
-        // Just in case, I will assume I need to implement serialization if missing.
-        // But wait, `certificate_verify.rs` test showed `to_bytes` usage on `CertificateVerify`.
-        // High chance `Certificate` has it too.
-
-        // I'll call `to_bytes()` on the certificate.
-        // Wait, `certificate` field is `Certificate` struct.
-        // If `to_bytes` is missing, I'll need to add it.
-        // For now, I will assume it exists. (I will check file later).
-
-        // Actually, looking at `read_file` output for `certificate.rs` earlier, only `from_bytes` was shown in lines 1-100.
-        // I should check if `to_bytes` exists.
-
         let cert_bytes = self.certificate.to_bytes();
         self.send_handshake_message(&cert_bytes)?;
         self.transcript.update(&cert_bytes);
