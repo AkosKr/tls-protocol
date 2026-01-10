@@ -253,7 +253,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                         // Verify it matches
                         if response == *message {
-                            print_success("✓ Echo matches sent message");
+                            print_success("Echo matches sent message");
                         } else {
                             println!("{}⚠{} Echo does not match!", YELLOW, RESET);
                         }
