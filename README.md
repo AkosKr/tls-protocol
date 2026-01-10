@@ -1590,7 +1590,11 @@ Experience a complete TLS 1.3 connection with our interactive demo! This demonst
 # Using the provided script (requires OpenSSL)
 ./generate_demo_cert.sh
 
-# Or use Rust example (generates minimal placeholder)
+# Or use Rust example for development only
+# NOTE: This generates an INVALID placeholder certificate that will cause
+#       the TLS 1.3 demo_server handshake to FAIL. Do not use this for
+#       running the live demo; use it only for experimenting with the
+#       certificate generation/parsing code.
 cargo run --example generate_demo_cert
 ```
 
