@@ -1653,10 +1653,11 @@ Step 3: Receiving ServerHello
 [INFO] Details: Negotiated X25519 ECDHE
 [INFO] Details: Computing shared secret
 [INFO] Details: Deriving handshake traffic keys
+[INFO] Encryption: Switched to handshake encryption (AES-128-GCM)
 
 Step 4: Receiving EncryptedExtensions
 ✓ EncryptedExtensions received and decrypted
-[INFO] Encryption: Switched to handshake encryption (AES-128-GCM)
+[INFO] Encryption: EncryptedExtensions received under handshake encryption (AES-128-GCM)
 
 Step 5: Receiving Certificate
 ✓ Certificate received
