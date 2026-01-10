@@ -74,12 +74,17 @@ fn handle_client(stream: std::net::TcpStream) -> Result<(), Box<dyn std::error::
             data
         }
         Err(_) => {
-            print_warning(&format!("Could not load {}, generating temporary certificate", cert_path));
-            print_warning("⚠️ WARNING: Using a temporary self-signed certificate");
-            print_warning("For production, generate proper certificates using: cargo run --example generate_demo_cert");
-            
-            // Generate temporary certificate for demo
-            vec![0u8; 100]
+            print_warning(&format!("Could not load TLS certificate from '{}'.", cert_path));
+            print_warning("This TLS demo server cannot run without a valid certificate.");
+            print_warning("Generate a demo certificate by running:");
+            print_warning("  cargo run --example generate_demo_cert");
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!(
+                    "Missing TLS certificate: '{}'. Generate it with `cargo run --example generate_demo_cert` and rerun the demo.",
+                    cert_path
+                ),
+            ).into());
         }
     };
     
