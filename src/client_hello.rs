@@ -166,7 +166,6 @@ impl ClientHello {
 
         // Check minimum length (1+3+2+32+1+0+2+2+1+1+2 = 47 bytes minimum)
         if data.len() < 47 {
-            println!("ClientHello from_bytes failed: len {} < 47", data.len());
             return Err(TlsError::IncompleteData);
         }
 
@@ -184,7 +183,6 @@ impl ClientHello {
         offset += 3;
 
         if data.len() < offset + length {
-            println!("ClientHello from_bytes failed: data.len() {} < offset {} + length {}", data.len(), offset, length);
             return Err(TlsError::IncompleteData);
         }
 
@@ -206,7 +204,6 @@ impl ClientHello {
         let session_id_len = data[offset] as usize;
         offset += 1;
         if offset + session_id_len > data.len() {
-            println!("CH parse error: SessionID overflow. Off {}, Len {}, Total {}", offset, session_id_len, data.len());
             return Err(TlsError::IncompleteData);
         }
         let legacy_session_id = data[offset..offset + session_id_len].to_vec();
@@ -214,22 +211,16 @@ impl ClientHello {
 
         // Cipher suites
         if offset + 2 > data.len() {
-            println!("CH parse error: CipherSuites length field missing");
             return Err(TlsError::IncompleteData);
         }
         let cipher_suites_len = ((data[offset] as usize) << 8) | (data[offset + 1] as usize);
         offset += 2;
         
         if offset + cipher_suites_len > data.len() {
-            println!("CH parse error: CipherSuites overflow. Off {}, Len {}, Total {}", offset, cipher_suites_len, data.len());
             return Err(TlsError::IncompleteData);
         }
         
         if cipher_suites_len % 2 != 0 {
-            println!(
-                "CH parse error: CipherSuites length is not even. Len {}",
-                cipher_suites_len
-            );
             return Err(TlsError::IncompleteData);
         }
         
@@ -245,13 +236,11 @@ impl ClientHello {
 
         // Compression methods
         if offset + 1 > data.len() {
-            println!("CH parse error: Compression length field missing");
             return Err(TlsError::IncompleteData);
         }
         let compression_methods_len = data[offset] as usize;
         offset += 1;
         if offset + compression_methods_len > data.len() {
-            println!("CH parse error: Compression overflow");
             return Err(TlsError::IncompleteData);
         }
         // We typically expect 0x00 (null compression), but we just skip over it
@@ -268,7 +257,6 @@ impl ClientHello {
         offset += 2;
         
         if offset + extensions_len > data.len() {
-            println!("CH parse error: Extensions overflow. Off {}, Len {}, Total {}", offset, extensions_len, data.len());
             return Err(TlsError::IncompleteData);
         }
         

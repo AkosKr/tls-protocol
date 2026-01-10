@@ -2,8 +2,14 @@
 //!
 //! This example demonstrates how to set up a TLS 1.3 server using the `TlsServer` struct.
 //!
-//! Note: To run a working TLS handshake, you need a valid X.509 certificate and
-//! corresponding private key. This example uses placeholders.
+//! ⚠️ WARNING: This example uses placeholder credentials and will NOT complete a successful
+//! handshake with real clients. To run a working TLS server, you must:
+//! 1. Generate or obtain a valid X.509 certificate in DER format
+//! 2. Load the corresponding private key
+//! 3. Ensure the certificate's public key matches the private key
+//!
+//! Consider using a certificate generation library like `rcgen` or tools like OpenSSL
+//! to create proper certificates for testing.
 
 use std::net::TcpListener;
 use std::thread;
@@ -15,17 +21,21 @@ fn handle_client(stream: std::net::TcpStream) -> Result<(), Box<dyn std::error::
     println!("New connection from: {}", stream.peer_addr()?);
 
     // 1. Setup Server Credentials
-    // In a real application, load these from disk (e.g. PEM files)
+    // ⚠️ WARNING: This example uses placeholder credentials for demonstration purposes only.
+    // The dummy certificate does NOT match the generated private key and will fail
+    // signature verification on any real TLS client.
+    //
+    // For production use:
+    // - Load a valid X.509 DER certificate from disk (e.g., using std::fs::read)
+    // - Load the corresponding private key (e.g., from PEM using rsa::RsaPrivateKey::from_pkcs8_pem)
+    // - Or use a library like `rcgen` to generate self-signed certificates for testing
     
     // Generate a temporary RSA key for demonstration (2048 bits)
     let mut rng = rand::rngs::OsRng;
     let rsa_key = RsaPrivateKey::new(&mut rng, 2048)?;
     let private_key = PrivateKey::Rsa(rsa_key);
 
-    // Create a dummy certificate placeholder
-    // NOTE: This will fail signature verification on the client because the public key
-    // in this dummy cert doesn't match the private key we just generated.
-    // In a real implementation, you must construct a valid X.509 certificate containing `rsa_key.to_public_key()`.
+    // Dummy certificate (NOT VALID - for demonstration only)
     let cert_data = vec![0u8; 100]; 
     let certificate = Certificate::new(vec![], vec![CertificateEntry::new(cert_data, vec![])]);
 
