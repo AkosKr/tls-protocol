@@ -725,8 +725,7 @@ handshake.on_application_data_sent()?;
   - Uses `KeySchedule` for traffic secret derivation
   - Maintains `TranscriptHash` for handshake message authentication
   - Generates and stores `X25519KeyPair` for ECDHE key exchange
-  - Manages separate AEAD ciphers for handshake and application encryption
-  - Tracks sequence numbers for proper AEAD nonce construction
+  - Manages separate AEAD ciphers for handshake and application encryption (each cipher maintains its own sequence numbers internally)
   - Supports optional Server Name Indication (SNI)
 
 - **Connection Management**:
@@ -740,11 +739,9 @@ handshake.on_application_data_sent()?;
     - Automatically decrypts based on current encryption state
     - Extracts real content type from TLSInnerPlaintext
     - Handles padding removal
-    - Manages receive sequence numbers
   - `write_record()` - Encrypt and write TLS records to socket
     - Automatically encrypts based on current encryption state
     - Constructs TLSInnerPlaintext with content type
-    - Manages send sequence numbers
     - Uses appropriate cipher (handshake or application)
   - `send_handshake_message()` - Send handshake messages
   - `receive_handshake_message()` - Receive and validate handshake messages
@@ -835,7 +832,7 @@ handshake.on_application_data_sent()?;
 - Secure key material handling (zeroization via existing types)
 
 **Integration Points**:
-- ✅ Uses `TlsStream` for TCP connection
+- ✅ Uses `std::net::TcpStream` directly for TCP connection
 - ✅ Uses `TlsHandshake` for state machine
 - ✅ Uses `KeySchedule` for key derivation (Issue #13)
 - ✅ Uses `TranscriptHash` for handshake hashing (Issue #15)

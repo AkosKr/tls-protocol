@@ -72,12 +72,6 @@ pub struct TlsClient {
     /// Server application traffic keys (used after Finished)
     server_application_keys: Option<AeadCipher>,
 
-    /// Sequence number for sending records
-    send_sequence: u64,
-
-    /// Sequence number for receiving records
-    recv_sequence: u64,
-
     /// Server name for SNI extension (optional)
     server_name: Option<String>,
 }
@@ -101,8 +95,6 @@ impl TlsClient {
             server_handshake_keys: None,
             client_application_keys: None,
             server_application_keys: None,
-            send_sequence: 0,
-            recv_sequence: 0,
             server_name: None,
         }
     }
@@ -184,8 +176,6 @@ impl TlsClient {
                 // decrypt_record returns (content, content_type)
                 let (content, content_type_byte) = decrypt_record(cipher, &payload, &header_bytes)?;
 
-                self.recv_sequence += 1;
-
                 let real_content_type = ContentType::try_from(content_type_byte)
                     .map_err(|_| TlsError::InvalidContentType(content_type_byte))?;
 
@@ -199,8 +189,6 @@ impl TlsClient {
 
                 // decrypt_record returns (content, content_type)
                 let (content, content_type_byte) = decrypt_record(cipher, &payload, &header_bytes)?;
-
-                self.recv_sequence += 1;
 
                 let real_content_type = ContentType::try_from(content_type_byte)
                     .map_err(|_| TlsError::InvalidContentType(content_type_byte))?;
@@ -249,8 +237,6 @@ impl TlsClient {
                     0,                   // No padding
                 )?;
 
-                self.send_sequence += 1;
-
                 // Construct record header for ApplicationData (encrypted records)
                 let header = RecordHeader::new(
                     ContentType::ApplicationData,
@@ -285,8 +271,6 @@ impl TlsClient {
                     &[0x17, 0x03, 0x03], // AAD: ApplicationData type + version
                     0,                   // No padding
                 )?;
-
-                self.send_sequence += 1;
 
                 // Construct record header for ApplicationData (encrypted records)
                 let header = RecordHeader::new(
@@ -440,10 +424,6 @@ impl TlsClient {
         self.client_handshake_keys = Some(AeadCipher::new(client_keys));
         self.server_handshake_keys = Some(AeadCipher::new(server_keys));
 
-        // Reset sequence numbers for handshake encryption
-        self.send_sequence = 0;
-        self.recv_sequence = 0;
-
         // Update state machine (switches to handshake encryption)
         self.handshake.on_server_hello_received()?;
 
@@ -588,10 +568,6 @@ impl TlsClient {
         // Create AEAD ciphers
         self.client_application_keys = Some(AeadCipher::new(client_keys));
         self.server_application_keys = Some(AeadCipher::new(server_keys));
-
-        // Reset sequence numbers for application encryption
-        self.send_sequence = 0;
-        self.recv_sequence = 0;
 
         // Update state machine (switches to application encryption)
         self.handshake.on_client_finished_sent()?;
