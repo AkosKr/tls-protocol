@@ -175,7 +175,7 @@ Transport Layer Security
 ### 2. Server Hello (Plaintext)
 
 **Key fields to examine**:
-- **Version**: TLS 1.2 (0x0303)
+- **Version**: TLS 1.2 (0x0303) legacy_version field for compatibility; actual negotiated version is TLS 1.3 (0x0304) via the `supported_versions` extension
 - **Random**: 32 random bytes (different from client)
 - **Cipher Suite**: `TLS_AES_128_GCM_SHA256 (0x1301)`
 - **Extensions**:
