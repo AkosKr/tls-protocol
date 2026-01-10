@@ -269,20 +269,6 @@ impl TlsServer {
 
         self.handshake.on_client_hello_received()?;
 
-        // We prepare the KeyShare extension for ServerHello here or inside send_server_hello.
-        // Let's store the ephemeral public key to be used in send_server_hello
-        // Creating a temporary field or passing it?
-        // Since `perform_handshake` is sequential, we can just assume `send_server_hello` generates a new one?
-        // NO. We already computed the shared secret using the generated private key.
-        // We MUST send the corresponding public key.
-        // So we need to store `server_public_key_bytes` temporarily or re-generate?
-        // We can't re-generate because we already advanced the key schedule with the shared secret derived from THAT private key.
-
-        // Let's store the key share extension data in the struct? No, that's messy.
-        // Better: receive_client_hello should probably return the `server_public_key_bytes` to be passed to `send_server_hello`?
-        // Or store it in `self.server_keypair`? `X25519KeyPair` has `public_key`.
-        // We can retrieve it from `self.server_keypair`.
-
         Ok(())
     }
 
