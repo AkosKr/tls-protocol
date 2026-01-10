@@ -1661,7 +1661,7 @@ Step 3: Receiving ServerHello
 
 Step 4: Receiving EncryptedExtensions
 ✓ EncryptedExtensions received and decrypted
-[INFO] Encryption: EncryptedExtensions received under handshake encryption (AES-128-GCM)
+[INFO] Encryption: Message encrypted with handshake keys (AES-128-GCM)
 
 Step 5: Receiving Certificate
 ✓ Certificate received
