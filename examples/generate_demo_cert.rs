@@ -64,14 +64,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn create_placeholder_certificate() -> Vec<u8> {
-    // This is a minimal placeholder
-    // In a production environment, use proper certificate generation
-    // with libraries like rcgen or x509-cert
+    // ⚠️  CRITICAL WARNING: This creates an INVALID certificate that WILL NOT WORK
+    // ⚠️  for actual TLS handshakes. It will cause connection failures.
+    //
+    // This placeholder exists only to demonstrate the file format structure.
+    // The hardcoded bytes (0x30, 0x82, 0x01, 0x00) represent an incomplete DER
+    // SEQUENCE header that does NOT constitute a valid X.509 certificate.
+    //
+    // For a WORKING demo, you MUST use one of these alternatives:
+    //   1. Run: ./generate_demo_cert.sh (OpenSSL-based, RECOMMENDED)
+    //   2. Use the rcgen library: https://crates.io/crates/rcgen
+    //   3. Use OpenSSL directly: openssl req -x509 -newkey rsa:2048 ...
+    //
+    // This function should be replaced with proper certificate generation
+    // using libraries like rcgen or x509-cert for production code.
 
-    // Minimal DER certificate structure (NOT VALID for real TLS)
+    // Minimal DER certificate structure (INVALID - will fail TLS validation)
     vec![
         0x30, 0x82, 0x01,
-        0x00, // SEQUENCE header
-             // ... rest would be a proper X.509 certificate
+        0x00, // SEQUENCE header (incomplete - NOT a valid certificate)
+             // ... rest would need to be a proper X.509 certificate structure
     ]
 }
