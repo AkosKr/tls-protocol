@@ -40,6 +40,9 @@ pub struct TlsServer {
     /// Server's X25519 public key (ephemeral)
     server_public_key: Option<Vec<u8>>,
 
+    /// Received ClientHello message
+    client_hello: Option<ClientHello>,
+
     /// Server's Identity Certificate
     certificate: Certificate,
 
@@ -68,6 +71,7 @@ impl TlsServer {
             key_schedule: KeySchedule::new(),
             transcript: TranscriptHash::new(),
             server_public_key: None,
+            client_hello: None,
             certificate,
             private_key,
             client_handshake_keys: None,
@@ -256,8 +260,8 @@ impl TlsServer {
         // Store Public Key for ServerHello
         self.server_public_key = Some(server_public_key_bytes);
 
-        // We need to return this information or store it for send_server_hello
-        // But send_server_hello needs to happen *after* we update transcript with ClientHello
+        // Store ClientHello for later use (e.g., echoing legacy_session_id)
+        self.client_hello = Some(client_hello);
 
         self.transcript.update(&client_hello_bytes);
         self.key_schedule
