@@ -1578,6 +1578,195 @@ assert_eq!(header.length, 5);
 let decoded = decode_header(&data).unwrap();
 ```
 
+## 🚀 Live Demo: End-to-End TLS 1.3 Handshake
+
+Experience a complete TLS 1.3 connection with our interactive demo! This demonstration shows the full handshake process, encrypted data exchange, and can be analyzed with Wireshark.
+
+### Quick Start
+
+**Step 1: Generate Demo Certificates**
+
+```bash
+# Using the provided script (requires OpenSSL)
+./generate_demo_cert.sh
+
+# Or use Rust example (generates minimal placeholder)
+cargo run --example generate_demo_cert
+```
+
+**Step 2: Run the Demo Server**
+
+```bash
+cargo run --example demo_server
+```
+
+Expected output:
+```
+═══════════════════════════════════════════════════════
+TLS 1.3 Demo Server
+═══════════════════════════════════════════════════════
+
+This server demonstrates:
+  • Complete TLS 1.3 handshake (ClientHello → ServerHello → Finished)
+  • X25519 ECDHE key exchange
+  • AES-128-GCM encryption
+  • Certificate-based authentication
+  • Encrypted application data exchange
+
+For Wireshark analysis:
+  1. Start Wireshark before running the client
+  2. Capture on 'lo' (loopback) interface
+  3. Use filter: tcp.port == 4433
+  4. See docs/WIRESHARK_DEMO_GUIDE.md for detailed instructions
+
+Listening on 127.0.0.1:4433
+=================================
+[INFO] Status: Waiting for connections...
+```
+
+**Step 3: Run the Demo Client** (in another terminal)
+
+```bash
+cargo run --example demo_client
+```
+
+Expected output:
+```
+═══════════════════════════════════════════════════════
+TLS 1.3 Demo Client
+═══════════════════════════════════════════════════════
+
+Connection Setup
+================
+Step 1: Connecting to 127.0.0.1:4433
+✓ TCP connection established
+
+TLS 1.3 Handshake
+=================
+Step 2: Sending ClientHello
+[INFO] Details: Generating X25519 keypair
+[INFO] Details: Setting cipher suite: TLS_AES_128_GCM_SHA256
+✓ ClientHello sent
+
+Step 3: Receiving ServerHello
+✓ ServerHello received
+[INFO] Details: Negotiated X25519 ECDHE
+[INFO] Details: Computing shared secret
+[INFO] Details: Deriving handshake traffic keys
+
+Step 4: Receiving EncryptedExtensions
+✓ EncryptedExtensions received and decrypted
+[INFO] Encryption: Switched to handshake encryption (AES-128-GCM)
+
+Step 5: Receiving Certificate
+✓ Certificate received
+
+Step 6: Receiving CertificateVerify
+✓ CertificateVerify received and signature validated
+
+Step 7: Receiving server Finished
+✓ Server Finished received and verified
+
+Step 8: Sending client Finished
+✓ Client Finished sent
+✓ Handshake Complete!
+
+Application Data Exchange
+=========================
+Message #1
+==========
+[INFO] Sending: "Hello, TLS 1.3!"
+✓ Encrypted and sent to server
+✓ Echo matches sent message
+
+Session Summary
+===============
+[INFO] Messages sent: 3
+✓ Demo complete!
+```
+
+### 🔍 Wireshark Analysis
+
+To see the TLS 1.3 protocol in action:
+
+1. **Start Wireshark** before running the client
+2. **Capture on loopback interface** (`lo` on Linux, `Loopback` on Windows/macOS)
+3. **Apply filter**: `tcp.port == 4433`
+4. **Run the demo** (server and client as shown above)
+5. **Observe**:
+   - Plaintext ClientHello and ServerHello messages
+   - Encrypted handshake messages (Certificate, Finished, etc.)
+   - Encrypted application data records
+   - TLS 1.3's 1-RTT handshake pattern
+
+**For detailed analysis instructions**, see [docs/WIRESHARK_DEMO_GUIDE.md](docs/WIRESHARK_DEMO_GUIDE.md)
+
+### What You'll See
+
+The demo showcases:
+
+- ✅ **Complete TLS 1.3 Handshake**: Full protocol flow from ClientHello to application data
+- ✅ **X25519 ECDHE**: Modern elliptic curve key exchange
+- ✅ **AES-128-GCM**: Authenticated encryption with associated data (AEAD)
+- ✅ **Certificate Authentication**: RSA-2048 signatures proving server identity
+- ✅ **Transcript Hashing**: SHA-256 hashing of all handshake messages
+- ✅ **HKDF Key Derivation**: Extracting traffic keys from shared secret
+- ✅ **Message Encryption**: All post-ServerHello messages encrypted
+- ✅ **Echo Protocol**: Simple application-level protocol on top of TLS
+
+### Demo Features
+
+**Educational Console Output:**
+- Color-coded messages showing handshake phases
+- Security-relevant information (keys, hashes) displayed in hex
+- Step-by-step progress indicators
+- Clear success/failure indicators
+
+**Robust Error Handling:**
+- Graceful degradation with temporary certificates
+- Clear error messages with troubleshooting hints
+- Automatic fallback for missing certificate files
+
+**Wireshark-Friendly:**
+- Reminder messages about starting packet capture
+- Filter suggestions for traffic analysis
+- Timing designed for easy capture
+
+### Customization
+
+Modify the demo for your needs:
+
+```rust
+// Change the test messages in demo_client.rs
+let test_messages = vec![
+    b"Your custom message here".to_vec(),
+    b"Another message".to_vec(),
+];
+
+// Adjust server address in demo_server.rs
+let addr = "127.0.0.1:8443";  // Different port
+
+// Use different certificates
+let cert_path = "my_cert.der";
+let key_path = "my_key.pem";
+```
+
+### Troubleshooting
+
+**Connection refused:**
+- Ensure demo_server is running first
+- Check no other process is using port 4433: `lsof -i :4433`
+
+**Certificate errors:**
+- Regenerate certificates: `./generate_demo_cert.sh`
+- Ensure demo_cert.der and demo_key.pem exist in project root
+
+**Handshake failures:**
+- Check both binaries are from the same build
+- Verify no firewall blocking localhost:4433
+
+For more help, see [docs/WIRESHARK_DEMO_GUIDE.md](docs/WIRESHARK_DEMO_GUIDE.md)
+
 ## Testing
 
 Run all tests:

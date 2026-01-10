@@ -24,3 +24,8 @@ target
 # Added by cargo
 
 /target
+
+# Demo certificates (regenerate with ./generate_demo_cert.sh)
+demo_cert.pem
+demo_cert.der
+demo_key.pem
