@@ -140,8 +140,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Ok(_) => {
             print_success("EncryptedExtensions received and decrypted");
             print_info(
-                "Encryption",
-                "Message encrypted with handshake keys (AES-128-GCM)",
+                "Details",
+                "Contains server-selected extensions (e.g., ALPN, SNI response)",
             );
         }
         Err(e) => {
