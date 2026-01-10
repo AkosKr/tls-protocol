@@ -285,15 +285,11 @@ impl TlsServer {
     /// Step 2: Send ServerHello
     pub fn send_server_hello(&mut self) -> Result<(), TlsError> {
         let random: [u8; 32] = rand::random();
-        let legacy_session_id_echo = vec![]; // Simplified: Assume empty or random for now, or we should have echoed ClientHello's.
-                                             // RFC says: echo ClientHello.legacy_session_id.
-                                             // Ideally receive_client_hello should store it.
-                                             // For now, let's use a dummy. The client example creates a random legacy_id?
-                                             // `ClientHello` struct has `legacy_session_id`.
-                                             // I should probably fix `receive_client_hello` to capture it if I want to be compliant.
-                                             // But for this exercise, empty might cause issues if client checks.
-                                             // Let's verify `client.rs`. check legacy_session_id logic.
-                                             // `client.rs` doesn't check echo.
+        let legacy_session_id_echo = self
+            .client_hello
+            .as_ref()
+            .map(|ch| ch.legacy_session_id.clone())
+            .unwrap_or_default();
 
         let cipher_suite = 0x1301; // TLS_AES_128_GCM_SHA256 (default)
 
