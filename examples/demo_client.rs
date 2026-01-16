@@ -236,8 +236,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // Show raw bytes (first few)
         print_security("Plaintext bytes", message, 16);
 
-        match client.send_application_data(message) {
-            Ok(_) => print_success("Plaintext encrypted by TLS and sent to server"),
+        match client.send_application_data_with_record(message) {
+            Ok(record) => {
+                print_success("Plaintext encrypted by TLS and sent to server");
+
+                // Show encrypted TLS record
+                println!("{}Encrypted TLS Record:{}", MAGENTA, RESET);
+                print_info("  Total Size", &format!("{} bytes", record.len()));
+                if record.len() > 5 {
+                    print_security("  Encrypted Payload", &record[5..], 24);
+                    println!(
+                        "  {}→ This is what Wireshark sees in the packet{}",
+                        CYAN, RESET
+                    );
+                }
+            }
             Err(e) => {
                 eprintln!("{}✗{} Failed to send: {:?}", "\x1b[31m", RESET, e);
                 break;

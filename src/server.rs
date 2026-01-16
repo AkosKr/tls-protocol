@@ -60,6 +60,13 @@ pub struct TlsServer {
 
     /// Server application traffic keys (used after Finished)
     server_application_keys: Option<AeadCipher>,
+
+    /// Supported cipher suites (server preference order)
+    /// Defaults to all TLS 1.3 cipher suites
+    supported_cipher_suites: Vec<u16>,
+
+    /// Negotiated cipher suite (set during handshake)
+    negotiated_cipher_suite: Option<u16>,
 }
 
 impl TlsServer {
@@ -78,7 +85,23 @@ impl TlsServer {
             server_handshake_keys: None,
             client_application_keys: None,
             server_application_keys: None,
+            supported_cipher_suites: vec![
+                crate::client_hello::TLS_AES_128_GCM_SHA256,
+                crate::client_hello::TLS_AES_256_GCM_SHA384,
+                crate::client_hello::TLS_CHACHA20_POLY1305_SHA256,
+            ],
+            negotiated_cipher_suite: None,
         }
+    }
+
+    /// Set the supported cipher suites (in server preference order)
+    pub fn set_supported_cipher_suites(&mut self, cipher_suites: Vec<u16>) {
+        self.supported_cipher_suites = cipher_suites;
+    }
+
+    /// Get the negotiated cipher suite (if handshake completed)
+    pub fn negotiated_cipher_suite(&self) -> Option<u16> {
+        self.negotiated_cipher_suite
     }
 
     /// Check if the handshake is complete
@@ -281,7 +304,25 @@ impl TlsServer {
             .map(|ch| ch.legacy_session_id.clone())
             .unwrap_or_default();
 
-        let cipher_suite = 0x1301; // TLS_AES_128_GCM_SHA256 (default)
+        // Negotiate cipher suite: find first server-supported cipher in client's list
+        let client_hello = self
+            .client_hello
+            .as_ref()
+            .ok_or(TlsError::InvalidState("ClientHello not received".into()))?;
+
+        let cipher_suite = self
+            .supported_cipher_suites
+            .iter()
+            .find(|&server_suite| client_hello.cipher_suites.contains(server_suite))
+            .copied()
+            .ok_or_else(|| {
+                TlsError::InvalidState(
+                    "No common cipher suite found between client and server".into(),
+                )
+            })?;
+
+        // Store negotiated cipher suite
+        self.negotiated_cipher_suite = Some(cipher_suite);
 
         // Retrieve server public key
         let public_key = self
@@ -434,6 +475,57 @@ impl TlsServer {
         self.write_record(ContentType::ApplicationData, data)?;
         self.handshake.on_application_data_sent()?;
         Ok(())
+    }
+
+    /// Send application data and return the encrypted TLS record
+    ///
+    /// Encrypts and sends application data, returning the complete encrypted TLS record
+    /// (header + encrypted payload) that was sent. Useful for debugging and Wireshark analysis.
+    pub fn send_application_data_with_record(&mut self, data: &[u8]) -> Result<Vec<u8>, TlsError> {
+        if !self.is_ready() {
+            return Err(TlsError::InvalidState("Handshake not complete".into()));
+        }
+
+        // Get the cipher
+        let cipher = self
+            .server_application_keys
+            .as_mut()
+            .ok_or_else(|| TlsError::InvalidState("No application keys available".to_string()))?;
+
+        // Calculate the ciphertext length
+        let padding_len = 0;
+        let inner_plaintext_len = data.len() + 1 + padding_len;
+        let ciphertext_len = inner_plaintext_len + crate::aead::TAG_SIZE;
+
+        // Construct the header
+        let header = RecordHeader::new(ContentType::ApplicationData, 0x0303, ciphertext_len as u16);
+        let header_bytes = header.to_bytes();
+
+        // Encrypt
+        let ciphertext = crate::aead::encrypt_record(
+            cipher,
+            data,
+            ContentType::ApplicationData as u8,
+            &header_bytes,
+            padding_len,
+        )?;
+
+        // Combine header + ciphertext for the complete record
+        let mut record = Vec::new();
+        record.extend_from_slice(&header_bytes);
+        record.extend_from_slice(&ciphertext);
+
+        // Send the record
+        self.stream
+            .write_all(&record)
+            .map_err(|e| TlsError::InvalidState(format!("IO error: {}", e)))?;
+        self.stream
+            .flush()
+            .map_err(|e| TlsError::InvalidState(format!("IO error: {}", e)))?;
+
+        self.handshake.on_application_data_sent()?;
+
+        Ok(record)
     }
 
     pub fn receive_application_data(&mut self) -> Result<Vec<u8>, TlsError> {
