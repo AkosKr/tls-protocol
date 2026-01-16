@@ -1756,6 +1756,45 @@ let cert_path = "my_cert.der";
 let key_path = "my_key.pem";
 ```
 
+### 🔬 Comprehensive Cipher Suite Demo
+
+For advanced demonstrations of cipher suite negotiation and Wireshark analysis, use the comprehensive demo:
+
+**Features:**
+- ✅ Multiple cipher suite negotiation scenarios
+- ✅ Client with different cipher configurations (AES-128, AES-256, ChaCha20)
+- ✅ Detailed encrypted/decrypted data display
+- ✅ Hex dumps for Wireshark comparison
+- ✅ Automatic scenario execution
+
+**Quick Start:**
+```bash
+# Automated (runs all scenarios)
+./run_comprehensive_demo.sh
+
+# Or manual:
+# Terminal 1:
+cargo run --example demo_comprehensive_server
+
+# Terminal 2:
+cargo run --example demo_comprehensive_client
+```
+
+**Scenarios Demonstrated:**
+1. **All Cipher Suites** - Server chooses preferred cipher
+2. **AES-128-GCM Only** - Client offers single cipher
+3. **AES-256-GCM Only** - Different cipher selection
+4. **ChaCha20-Poly1305 Only** - Alternative algorithm
+
+**Output includes:**
+- Plaintext data before encryption (hex dump)
+- Encryption status and cipher suite used
+- Encrypted TLS records sent over network
+- Decrypted plaintext after receiving (hex dump)
+- Echo verification
+
+**For detailed instructions**, see [docs/COMPREHENSIVE_DEMO.md](docs/COMPREHENSIVE_DEMO.md)
+
 ### Troubleshooting
 
 **Connection refused:**
