@@ -165,8 +165,18 @@ fn handle_client(stream: std::net::TcpStream) -> Result<(), Box<dyn std::error::
                 
                 // Echo back
                 print_info("Response", "Echoing message back to client");
-                match server.send_application_data(&data) {
-                    Ok(_) => print_success("Echo sent"),
+                match server.send_application_data_with_record(&data) {
+                    Ok(record) => {
+                        print_success("Echo sent");
+                        
+                        // Show encrypted TLS record
+                        println!("{}Encrypted TLS Record:{}", MAGENTA, RESET);
+                        print_info("  Total Size", &format!("{} bytes", record.len()));
+                        if record.len() > 5 {
+                            print_security("  Encrypted Payload", &record[5..], 24);
+                            println!("  {}→ This is what Wireshark sees in the packet{}", CYAN, RESET);
+                        }
+                    }
                     Err(e) => {
                         eprintln!("{}✗{} Failed to send: {:?}", "\x1b[31m", RESET, e);
                         break;
