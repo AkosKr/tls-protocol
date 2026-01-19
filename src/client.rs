@@ -60,6 +60,12 @@ pub struct TlsClient {
     /// Client's X25519 keypair for ECDHE
     client_keypair: Option<X25519KeyPair>,
 
+    /// Client handshake traffic secret (stored for Finished computation)
+    client_handshake_secret: Option<[u8; 32]>,
+
+    /// Server handshake traffic secret (stored for Finished verification)
+    server_handshake_secret: Option<[u8; 32]>,
+
     /// Client handshake traffic keys (used after ServerHello)
     client_handshake_keys: Option<AeadCipher>,
 
@@ -78,6 +84,15 @@ pub struct TlsClient {
     /// Custom cipher suites to use in ClientHello (optional)
     /// If None, uses default cipher suites
     custom_cipher_suites: Option<Vec<u16>>,
+
+    /// ALPN protocols to advertise (optional)
+    alpn_protocols: Option<Vec<String>>,
+
+    /// Buffer for handshake messages (in case multiple messages arrive in one record)
+    handshake_buffer: Vec<u8>,
+
+    /// Skip certificate verification (INSECURE - only for testing)
+    skip_certificate_verification: bool,
 }
 
 impl TlsClient {
@@ -95,13 +110,47 @@ impl TlsClient {
             key_schedule: KeySchedule::new(),
             transcript: TranscriptHash::new(),
             client_keypair: None,
+            client_handshake_secret: None,
+            server_handshake_secret: None,
             client_handshake_keys: None,
             server_handshake_keys: None,
             client_application_keys: None,
             server_application_keys: None,
             server_name: None,
             custom_cipher_suites: None,
+            alpn_protocols: None,
+            handshake_buffer: Vec::new(),
+            skip_certificate_verification: false,
         }
+    }
+
+    /// Set whether to skip certificate verification (INSECURE - only for testing)
+    ///
+    /// # Arguments
+    /// * `skip` - If true, certificate verification will be skipped
+    ///
+    /// # Warning
+    /// This is INSECURE and should only be used for testing purposes.
+    /// Skipping certificate verification makes the connection vulnerable to MITM attacks.
+    pub fn set_skip_certificate_verification(&mut self, skip: bool) {
+        self.skip_certificate_verification = skip;
+    }
+
+    /// Set ALPN protocols to advertise in ClientHello
+    ///
+    /// # Arguments
+    /// * `protocols` - List of protocol names (e.g., vec!["h2".to_string(), "http/1.1".to_string()])
+    ///
+    /// # Example
+    /// ```rust,no_run
+    /// use tls_protocol::TlsClient;
+    ///
+    /// let mut client = TlsClient::connect("example.com:443")?;
+    /// client.set_alpn_protocols(vec!["h2".to_string(), "http/1.1".to_string()]);
+    /// # Ok::<(), std::io::Error>(())
+    /// ```
+    pub fn set_alpn_protocols(&mut self, protocols: Vec<String>) {
+        self.alpn_protocols = Some(protocols);
     }
 
     /// Set custom cipher suites for the ClientHello
@@ -196,6 +245,11 @@ impl TlsClient {
         self.stream
             .read_exact(&mut payload)
             .map_err(|e| TlsError::InvalidState(format!("IO error: {}", e)))?;
+
+        // ChangeCipherSpec is always sent in plaintext (RFC 8446, Appendix D.4)
+        if header.content_type == ContentType::ChangeCipherSpec {
+            return Ok((header.content_type, payload));
+        }
 
         // Decrypt if necessary based on encryption state
         let encryption_state = self.handshake.current_encryption_state();
@@ -312,18 +366,66 @@ impl TlsClient {
     }
 
     /// Receive a handshake message
+    ///
+    /// Handles multiple handshake messages that may arrive in a single TLS record.
+    /// Messages are buffered and returned one at a time.
     fn receive_handshake_message(&mut self) -> Result<Vec<u8>, TlsError> {
-        let (content_type, payload) = self.read_record()?;
+        loop {
+            // First, check if we have a complete message in the buffer
+            if self.handshake_buffer.len() >= 4 {
+                // Try to parse handshake message length
+                let msg_len = ((self.handshake_buffer[1] as usize) << 16)
+                    | ((self.handshake_buffer[2] as usize) << 8)
+                    | (self.handshake_buffer[3] as usize);
 
-        if content_type != ContentType::Handshake {
-            return Err(TlsError::UnexpectedMessage {
-                expected: "Handshake".to_string(),
-                received: format!("{:?}", content_type),
-                state: self.handshake.current_state().as_str().to_string(),
-            });
+                let total_len = 4 + msg_len; // 1 byte type + 3 bytes length + message
+
+                if self.handshake_buffer.len() >= total_len {
+                    // We have a complete message, extract it
+                    let message = self.handshake_buffer[..total_len].to_vec();
+                    self.handshake_buffer.drain(..total_len);
+                    return Ok(message);
+                }
+            }
+
+            // Need to read more data
+            let (content_type, mut payload) = self.read_record()?;
+
+            match content_type {
+                ContentType::ChangeCipherSpec => {
+                    // RFC 8446, Appendix D.4: Middlebox Compatibility Mode
+                    // Implementations MUST be prepared to receive a ChangeCipherSpec
+                    // and MUST simply drop it without further processing.
+                    // Continue reading the next record.
+                    continue;
+                }
+                ContentType::Alert => {
+                    // Parse alert message
+                    if payload.len() >= 2 {
+                        let level = payload[0];
+                        let description = payload[1];
+                        return Err(TlsError::AlertReceived { level, description });
+                    } else {
+                        return Err(TlsError::InvalidState(format!(
+                            "Invalid alert message: {} bytes",
+                            payload.len()
+                        )));
+                    }
+                }
+                ContentType::Handshake => {
+                    // Add payload to buffer
+                    self.handshake_buffer.append(&mut payload);
+                    // Loop back to extract messages from buffer
+                }
+                content_type => {
+                    return Err(TlsError::UnexpectedMessage {
+                        expected: "Handshake".to_string(),
+                        received: format!("{:?}", content_type),
+                        state: self.handshake.current_state().as_str().to_string(),
+                    });
+                }
+            }
         }
-
-        Ok(payload)
     }
 
     /// Send ClientHello and initiate the handshake
@@ -362,6 +464,13 @@ impl TlsClient {
             client_hello
                 .extensions
                 .insert(0, Extension::ServerName(server_name.clone()));
+        }
+
+        // Add ALPN extension if protocols are specified
+        if let Some(ref protocols) = self.alpn_protocols {
+            client_hello
+                .extensions
+                .push(Extension::Alpn(protocols.clone()));
         }
 
         // Serialize ClientHello
@@ -440,6 +549,10 @@ impl TlsClient {
             .key_schedule
             .derive_server_handshake_traffic_secret(&transcript_hash);
 
+        // Store secrets for later use in Finished computation/verification
+        self.client_handshake_secret = Some(client_handshake_secret);
+        self.server_handshake_secret = Some(server_handshake_secret);
+
         // Derive traffic keys from secrets
         let client_keys = derive_traffic_keys(&client_handshake_secret);
         let server_keys = derive_traffic_keys(&server_handshake_secret);
@@ -507,8 +620,10 @@ impl TlsClient {
             TlsError::InvalidCertificateData("No certificates in chain".to_string())
         })?;
 
-        // Verify the signature
-        cert_verify.verify(&end_entity.cert_data, &self.transcript.current_hash())?;
+        // Verify the signature (unless skipped for testing)
+        if !self.skip_certificate_verification {
+            cert_verify.verify(&end_entity.cert_data, &self.transcript.current_hash())?;
+        }
 
         // Update transcript
         self.transcript.update(&cert_verify_bytes);
@@ -530,13 +645,13 @@ impl TlsClient {
         // Parse Finished
         let finished = Finished::from_bytes(&finished_bytes)?;
 
-        // Get server handshake traffic secret for verification
-        let server_secret = self
-            .key_schedule
-            .derive_server_handshake_traffic_secret(&transcript_hash);
+        // Get server handshake traffic secret (stored from ServerHello)
+        let server_secret = self.server_handshake_secret.as_ref().ok_or_else(|| {
+            TlsError::InvalidState("Server handshake secret not available".to_string())
+        })?;
 
         // Verify server Finished
-        finished.verify_server_finished(&server_secret, &transcript_hash)?;
+        finished.verify_server_finished(server_secret, &transcript_hash)?;
 
         // Update transcript
         self.transcript.update(&finished_bytes);
@@ -554,13 +669,13 @@ impl TlsClient {
         // Get transcript hash before sending Finished
         let transcript_hash = self.transcript.current_hash();
 
-        // Get client handshake traffic secret
-        let client_secret = self
-            .key_schedule
-            .derive_client_handshake_traffic_secret(&transcript_hash);
+        // Get client handshake traffic secret (stored from ServerHello)
+        let client_secret = self.client_handshake_secret.as_ref().ok_or_else(|| {
+            TlsError::InvalidState("Client handshake secret not available".to_string())
+        })?;
 
         // Generate client Finished
-        let finished = Finished::generate_client_finished(&client_secret, &transcript_hash);
+        let finished = Finished::generate_client_finished(client_secret, &transcript_hash);
 
         // Serialize Finished
         let finished_bytes = finished.to_bytes();
@@ -568,22 +683,22 @@ impl TlsClient {
         // Send encrypted message
         self.send_handshake_message(&finished_bytes)?;
 
-        // Update transcript
-        self.transcript.update(&finished_bytes);
-
-        // Advance key schedule to master secret
+        // Advance key schedule to master secret BEFORE updating transcript
+        // This is important: application secrets are derived from the transcript
+        // up to server Finished, NOT including client Finished
         self.key_schedule.advance_to_master_secret();
 
-        // Get updated transcript hash for application traffic secrets
-        let app_transcript_hash = self.transcript.current_hash();
-
-        // Derive application traffic secrets
+        // Derive application traffic secrets using transcript up to server Finished
+        // (before adding client Finished to transcript)
         let client_app_secret = self
             .key_schedule
-            .derive_client_application_traffic_secret(&app_transcript_hash);
+            .derive_client_application_traffic_secret(&transcript_hash);
         let server_app_secret = self
             .key_schedule
-            .derive_server_application_traffic_secret(&app_transcript_hash);
+            .derive_server_application_traffic_secret(&transcript_hash);
+
+        // NOW update transcript with client Finished (after deriving app secrets)
+        self.transcript.update(&finished_bytes);
 
         // Derive traffic keys
         let client_keys = derive_traffic_keys(&client_app_secret);
@@ -738,16 +853,51 @@ impl TlsClient {
             ));
         }
 
-        let (content_type, data) = self.read_record()?;
+        loop {
+            let (content_type, data) = self.read_record()?;
 
-        if content_type != ContentType::ApplicationData {
-            return Err(TlsError::UnexpectedMessage {
-                expected: "ApplicationData".to_string(),
-                received: format!("{:?}", content_type),
-                state: self.handshake.current_state().as_str().to_string(),
-            });
+            match content_type {
+                ContentType::ApplicationData => {
+                    return Ok(data);
+                }
+                ContentType::Alert => {
+                    // Handle alert message
+                    if data.len() >= 2 {
+                        let level = data[0];
+                        let description = data[1];
+                        return Err(TlsError::AlertReceived { level, description });
+                    } else {
+                        return Err(TlsError::InvalidState(format!(
+                            "Invalid alert message: {} bytes",
+                            data.len()
+                        )));
+                    }
+                }
+                ContentType::Handshake => {
+                    // Post-handshake messages (e.g., NewSessionTicket)
+                    // Check handshake type - NewSessionTicket is 0x04
+                    if !data.is_empty() && data[0] == 0x04 {
+                        // NewSessionTicket - skip it and continue reading
+                        continue;
+                    }
+                    // Other handshake messages are unexpected
+                    return Err(TlsError::UnexpectedMessage {
+                        expected: "ApplicationData".to_string(),
+                        received: format!(
+                            "Handshake(type={})",
+                            if data.is_empty() { 0 } else { data[0] }
+                        ),
+                        state: self.handshake.current_state().as_str().to_string(),
+                    });
+                }
+                _ => {
+                    return Err(TlsError::UnexpectedMessage {
+                        expected: "ApplicationData".to_string(),
+                        received: format!("{:?}", content_type),
+                        state: self.handshake.current_state().as_str().to_string(),
+                    });
+                }
+            }
         }
-
-        Ok(data)
     }
 }
