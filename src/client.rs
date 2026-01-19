@@ -74,6 +74,10 @@ pub struct TlsClient {
 
     /// Server name for SNI extension (optional)
     server_name: Option<String>,
+
+    /// Custom cipher suites to use in ClientHello (optional)
+    /// If None, uses default cipher suites
+    custom_cipher_suites: Option<Vec<u16>>,
 }
 
 impl TlsClient {
@@ -96,7 +100,26 @@ impl TlsClient {
             client_application_keys: None,
             server_application_keys: None,
             server_name: None,
+            custom_cipher_suites: None,
         }
+    }
+
+    /// Set custom cipher suites for the ClientHello
+    ///
+    /// # Arguments
+    /// * `cipher_suites` - List of cipher suite identifiers to offer
+    ///
+    /// # Example
+    /// ```rust,no_run
+    /// use tls_protocol::TlsClient;
+    /// use tls_protocol::client_hello::TLS_AES_128_GCM_SHA256;
+    ///
+    /// let mut client = TlsClient::connect("example.com:443")?;
+    /// client.set_cipher_suites(vec![TLS_AES_128_GCM_SHA256]);
+    /// # Ok::<(), std::io::Error>(())
+    /// ```
+    pub fn set_cipher_suites(&mut self, cipher_suites: Vec<u16>) {
+        self.custom_cipher_suites = Some(cipher_suites);
     }
 
     /// Connect to a TLS server and create a new client
@@ -318,8 +341,21 @@ impl TlsClient {
         // Store keypair for later use
         self.client_keypair = Some(keypair);
 
-        // Create ClientHello with mandatory extensions
-        let mut client_hello = ClientHello::default_tls13(random, public_key);
+        // Create ClientHello with custom or default cipher suites
+        let mut client_hello = if let Some(ref cipher_suites) = self.custom_cipher_suites {
+            // Use custom cipher suites
+            let extensions = vec![
+                Extension::SupportedVersions(vec![crate::extensions::TLS_VERSION_1_3]),
+                Extension::KeyShare(vec![crate::extensions::KeyShareEntry {
+                    group: crate::extensions::NAMED_GROUP_X25519,
+                    key_exchange: public_key,
+                }]),
+            ];
+            ClientHello::new(random, Vec::new(), cipher_suites.clone(), extensions)
+        } else {
+            // Use default cipher suites
+            ClientHello::default_tls13(random, public_key)
+        };
 
         // Add SNI extension if server name is available
         if let Some(ref server_name) = self.server_name {
@@ -624,6 +660,67 @@ impl TlsClient {
         self.handshake.on_application_data_sent()?;
 
         Ok(())
+    }
+
+    /// Send application data and return the encrypted TLS record
+    ///
+    /// Encrypts and sends application data, returning the complete encrypted TLS record
+    /// (header + encrypted payload) that was sent. Useful for debugging and Wireshark analysis.
+    ///
+    /// # Arguments
+    /// * `data` - Application data to send
+    ///
+    /// # Returns
+    /// * `Ok(Vec<u8>)` containing the complete TLS record that was sent (5-byte header + ciphertext)
+    /// * `Err(TlsError)` if handshake is not complete or transmission fails
+    pub fn send_application_data_with_record(&mut self, data: &[u8]) -> Result<Vec<u8>, TlsError> {
+        if !self.is_ready() {
+            return Err(TlsError::InvalidState(
+                "Handshake not complete, cannot send application data".to_string(),
+            ));
+        }
+
+        // Get the cipher
+        let cipher = self
+            .client_application_keys
+            .as_mut()
+            .ok_or_else(|| TlsError::InvalidState("No application keys available".to_string()))?;
+
+        // Calculate the ciphertext length
+        let padding_len = 0;
+        let inner_plaintext_len = data.len() + 1 + padding_len;
+        let ciphertext_len = inner_plaintext_len + crate::aead::TAG_SIZE;
+
+        // Construct the header
+        let header = RecordHeader::new(ContentType::ApplicationData, 0x0303, ciphertext_len as u16);
+        let header_bytes = header.to_bytes();
+
+        // Encrypt
+        let ciphertext = crate::aead::encrypt_record(
+            cipher,
+            data,
+            ContentType::ApplicationData as u8,
+            &header_bytes,
+            padding_len,
+        )?;
+
+        // Combine header + ciphertext for the complete record
+        let mut record = Vec::new();
+        record.extend_from_slice(&header_bytes);
+        record.extend_from_slice(&ciphertext);
+
+        // Send the record
+        self.stream
+            .write_all(&record)
+            .map_err(|e| TlsError::InvalidState(format!("IO error: {}", e)))?;
+        self.stream
+            .flush()
+            .map_err(|e| TlsError::InvalidState(format!("IO error: {}", e)))?;
+
+        // Update state machine
+        self.handshake.on_application_data_sent()?;
+
+        Ok(record)
     }
 
     /// Receive application data
