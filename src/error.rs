@@ -105,6 +105,9 @@ pub enum TlsError {
     /// Handshake failed
     /// Carries a description of the failure.
     HandshakeFailed(String),
+    /// TLS Alert received from peer
+    /// Carries the alert level and description bytes
+    AlertReceived { level: u8, description: u8 },
 }
 
 impl fmt::Display for TlsError {
@@ -246,6 +249,14 @@ impl fmt::Display for TlsError {
             }
             TlsError::HandshakeFailed(desc) => {
                 write!(f, "Handshake failed: {}", desc)
+            }
+            TlsError::AlertReceived { level, description } => {
+                let level_str = match level {
+                    1 => "warning",
+                    2 => "fatal",
+                    _ => "unknown",
+                };
+                write!(f, "TLS Alert received: {} (level={}, description={})", level_str, level, description)
             }
         }
     }

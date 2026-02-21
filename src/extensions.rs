@@ -2,7 +2,9 @@ use crate::error::TlsError;
 
 /// TLS Extension Type Identifiers (RFC 8446)
 pub const EXT_SERVER_NAME: u16 = 0;
+pub const EXT_SUPPORTED_GROUPS: u16 = 10;
 pub const EXT_SIGNATURE_ALGORITHMS: u16 = 13;
+pub const EXT_ALPN: u16 = 16;
 pub const EXT_SUPPORTED_VERSIONS: u16 = 43;
 pub const EXT_KEY_SHARE: u16 = 51;
 
@@ -78,7 +80,13 @@ impl KeyShareEntry {
         let key_exchange = bytes[4..4 + key_len].to_vec();
         let total_len = 4 + key_len;
 
-        Ok((Self { group, key_exchange }, total_len))
+        Ok((
+            Self {
+                group,
+                key_exchange,
+            },
+            total_len,
+        ))
     }
 }
 
@@ -88,8 +96,14 @@ pub enum Extension {
     /// Server Name Indication (SNI) - Extension Type 0
     ServerName(String),
 
+    /// Supported Groups (Named Groups) - Extension Type 10
+    SupportedGroups(Vec<u16>),
+
     /// Signature Algorithms - Extension Type 13
     SignatureAlgorithms(Vec<u16>),
+
+    /// Application-Layer Protocol Negotiation - Extension Type 16
+    Alpn(Vec<String>),
 
     /// Supported Versions - Extension Type 43 (mandatory for TLS 1.3)
     SupportedVersions(Vec<u16>),
@@ -106,7 +120,9 @@ impl Extension {
     pub fn extension_type(&self) -> u16 {
         match self {
             Extension::ServerName(_) => EXT_SERVER_NAME,
+            Extension::SupportedGroups(_) => EXT_SUPPORTED_GROUPS,
             Extension::SignatureAlgorithms(_) => EXT_SIGNATURE_ALGORITHMS,
+            Extension::Alpn(_) => EXT_ALPN,
             Extension::SupportedVersions(_) => EXT_SUPPORTED_VERSIONS,
             Extension::KeyShare(_) => EXT_KEY_SHARE,
             Extension::Unknown { extension_type, .. } => *extension_type,
@@ -127,7 +143,7 @@ impl Extension {
                 // Validate hostname length fits in the protocol
                 let hostname_bytes = hostname.as_bytes();
                 let hostname_len = hostname_bytes.len();
-                
+
                 // Calculate max length that fits: ext_len = 2 + (1 + 2 + hostname_len) <= u16::MAX
                 // => hostname_len <= u16::MAX - 5
                 let max_hostname_len = (u16::MAX as usize).saturating_sub(5);
@@ -157,6 +173,34 @@ impl Extension {
                 bytes.extend_from_slice(&list_data);
             }
 
+            Extension::SupportedGroups(groups) => {
+                // Extension type
+                bytes.extend_from_slice(&EXT_SUPPORTED_GROUPS.to_be_bytes());
+
+                // Extension length (2 bytes for list length + groups)
+                let data_len = 2 + groups.len() * 2;
+                assert!(
+                    data_len <= u16::MAX as usize,
+                    "SupportedGroups extension data length {} exceeds u16::MAX",
+                    data_len
+                );
+                bytes.extend_from_slice(&(data_len as u16).to_be_bytes());
+
+                // Groups length
+                let groups_len_bytes = groups.len() * 2;
+                assert!(
+                    groups_len_bytes <= u16::MAX as usize,
+                    "SupportedGroups length {} exceeds u16::MAX",
+                    groups_len_bytes
+                );
+                bytes.extend_from_slice(&(groups_len_bytes as u16).to_be_bytes());
+
+                // Groups
+                for &group in groups {
+                    bytes.extend_from_slice(&group.to_be_bytes());
+                }
+            }
+
             Extension::SignatureAlgorithms(algorithms) => {
                 // Extension type
                 bytes.extend_from_slice(&EXT_SIGNATURE_ALGORITHMS.to_be_bytes());
@@ -183,6 +227,44 @@ impl Extension {
                 for &algo in algorithms {
                     bytes.extend_from_slice(&algo.to_be_bytes());
                 }
+            }
+
+            Extension::Alpn(protocols) => {
+                // Extension type
+                bytes.extend_from_slice(&EXT_ALPN.to_be_bytes());
+
+                // Build protocol list
+                let mut list_data = Vec::new();
+                for protocol in protocols {
+                    let protocol_bytes = protocol.as_bytes();
+                    assert!(
+                        protocol_bytes.len() <= u8::MAX as usize,
+                        "ALPN protocol name length {} exceeds u8::MAX",
+                        protocol_bytes.len()
+                    );
+                    list_data.push(protocol_bytes.len() as u8);
+                    list_data.extend_from_slice(protocol_bytes);
+                }
+
+                // Extension length (2 bytes for list length + list data)
+                let ext_len = 2 + list_data.len();
+                assert!(
+                    ext_len <= u16::MAX as usize,
+                    "ALPN extension length {} exceeds u16::MAX",
+                    ext_len
+                );
+                bytes.extend_from_slice(&(ext_len as u16).to_be_bytes());
+
+                // Protocol list length
+                assert!(
+                    list_data.len() <= u16::MAX as usize,
+                    "ALPN protocol list length {} exceeds u16::MAX",
+                    list_data.len()
+                );
+                bytes.extend_from_slice(&(list_data.len() as u16).to_be_bytes());
+
+                // Protocol list
+                bytes.extend_from_slice(&list_data);
             }
 
             Extension::SupportedVersions(versions) => {
@@ -245,7 +327,10 @@ impl Extension {
                 bytes.extend_from_slice(&entries_data);
             }
 
-            Extension::Unknown { extension_type, data } => {
+            Extension::Unknown {
+                extension_type,
+                data,
+            } => {
                 // Extension type
                 bytes.extend_from_slice(&extension_type.to_be_bytes());
 
@@ -291,7 +376,8 @@ impl Extension {
                     ));
                 }
 
-                let list_length = u16::from_be_bytes([extension_data[0], extension_data[1]]) as usize;
+                let list_length =
+                    u16::from_be_bytes([extension_data[0], extension_data[1]]) as usize;
                 if extension_data.len() < 2 + list_length {
                     return Err(TlsError::InvalidExtensionData(
                         "ServerName list length mismatch".to_string(),
@@ -307,9 +393,10 @@ impl Extension {
 
                 let name_type = list_data[0];
                 if name_type != 0x00 {
-                    return Err(TlsError::InvalidExtensionData(
-                        format!("Unknown ServerName type: {}", name_type),
-                    ));
+                    return Err(TlsError::InvalidExtensionData(format!(
+                        "Unknown ServerName type: {}",
+                        name_type
+                    )));
                 }
 
                 let name_length = u16::from_be_bytes([list_data[1], list_data[2]]) as usize;
@@ -320,24 +407,57 @@ impl Extension {
                 }
 
                 let hostname_bytes = &list_data[3..3 + name_length];
-                let hostname = String::from_utf8(hostname_bytes.to_vec())
-                    .map_err(|_| TlsError::InvalidExtensionData("Invalid UTF-8 in ServerName".to_string()))?;
+                let hostname = String::from_utf8(hostname_bytes.to_vec()).map_err(|_| {
+                    TlsError::InvalidExtensionData("Invalid UTF-8 in ServerName".to_string())
+                })?;
 
                 // Validate hostname length (RFC standards typically limit to 255 characters)
                 if hostname.len() > 255 {
-                    return Err(TlsError::InvalidExtensionData(
-                        format!("ServerName hostname too long: {} characters (max 255)", hostname.len())
-                    ));
+                    return Err(TlsError::InvalidExtensionData(format!(
+                        "ServerName hostname too long: {} characters (max 255)",
+                        hostname.len()
+                    )));
                 }
 
                 // Validate hostname format: must not be empty and should contain valid DNS characters
                 if hostname.is_empty() {
                     return Err(TlsError::InvalidExtensionData(
-                        "ServerName hostname is empty".to_string()
+                        "ServerName hostname is empty".to_string(),
                     ));
                 }
 
                 Extension::ServerName(hostname)
+            }
+
+            EXT_SUPPORTED_GROUPS => {
+                if extension_data.len() < 2 {
+                    return Err(TlsError::InvalidExtensionData(
+                        "SupportedGroups extension too short".to_string(),
+                    ));
+                }
+
+                let groups_length =
+                    u16::from_be_bytes([extension_data[0], extension_data[1]]) as usize;
+                if !groups_length.is_multiple_of(2) {
+                    return Err(TlsError::InvalidExtensionData(
+                        "SupportedGroups length must be even".to_string(),
+                    ));
+                }
+
+                if extension_data.len() < 2 + groups_length {
+                    return Err(TlsError::InvalidExtensionData(
+                        "SupportedGroups data incomplete".to_string(),
+                    ));
+                }
+
+                let mut groups = Vec::new();
+                for i in (0..groups_length).step_by(2) {
+                    let group =
+                        u16::from_be_bytes([extension_data[2 + i], extension_data[2 + i + 1]]);
+                    groups.push(group);
+                }
+
+                Extension::SupportedGroups(groups)
             }
 
             EXT_SIGNATURE_ALGORITHMS => {
@@ -347,7 +467,8 @@ impl Extension {
                     ));
                 }
 
-                let algos_length = u16::from_be_bytes([extension_data[0], extension_data[1]]) as usize;
+                let algos_length =
+                    u16::from_be_bytes([extension_data[0], extension_data[1]]) as usize;
                 if !algos_length.is_multiple_of(2) {
                     return Err(TlsError::InvalidExtensionData(
                         "SignatureAlgorithms length must be even".to_string(),
@@ -362,11 +483,64 @@ impl Extension {
 
                 let mut algorithms = Vec::new();
                 for i in (0..algos_length).step_by(2) {
-                    let algo = u16::from_be_bytes([extension_data[2 + i], extension_data[2 + i + 1]]);
+                    let algo =
+                        u16::from_be_bytes([extension_data[2 + i], extension_data[2 + i + 1]]);
                     algorithms.push(algo);
                 }
 
                 Extension::SignatureAlgorithms(algorithms)
+            }
+
+            EXT_ALPN => {
+                if extension_data.len() < 2 {
+                    return Err(TlsError::InvalidExtensionData(
+                        "ALPN extension too short".to_string(),
+                    ));
+                }
+
+                let list_length =
+                    u16::from_be_bytes([extension_data[0], extension_data[1]]) as usize;
+                if extension_data.len() < 2 + list_length {
+                    return Err(TlsError::InvalidExtensionData(
+                        "ALPN list data incomplete".to_string(),
+                    ));
+                }
+
+                let mut protocols = Vec::new();
+                let mut offset = 2;
+                let end = 2 + list_length;
+
+                while offset < end {
+                    if offset >= extension_data.len() {
+                        return Err(TlsError::InvalidExtensionData(
+                            "ALPN protocol length missing".to_string(),
+                        ));
+                    }
+
+                    let protocol_len = extension_data[offset] as usize;
+                    offset += 1;
+
+                    if offset + protocol_len > extension_data.len() {
+                        return Err(TlsError::InvalidExtensionData(
+                            "ALPN protocol data incomplete".to_string(),
+                        ));
+                    }
+
+                    let protocol_bytes = &extension_data[offset..offset + protocol_len];
+                    let protocol = String::from_utf8(protocol_bytes.to_vec()).map_err(|_| {
+                        TlsError::InvalidExtensionData("Invalid UTF-8 in ALPN".to_string())
+                    })?;
+                    protocols.push(protocol);
+                    offset += protocol_len;
+                }
+
+                if offset != end {
+                    return Err(TlsError::InvalidExtensionData(
+                        "ALPN list length mismatch".to_string(),
+                    ));
+                }
+
+                Extension::Alpn(protocols)
             }
 
             EXT_SUPPORTED_VERSIONS => {
@@ -376,23 +550,35 @@ impl Extension {
                     ));
                 }
 
-                let versions_length = extension_data[0] as usize;
-                if !versions_length.is_multiple_of(2) {
-                    return Err(TlsError::InvalidExtensionData(
-                        "SupportedVersions length must be even".to_string(),
-                    ));
-                }
-
-                if extension_data.len() < 1 + versions_length {
-                    return Err(TlsError::InvalidExtensionData(
-                        "SupportedVersions data incomplete".to_string(),
-                    ));
-                }
+                // ClientHello format: 1-byte length + versions (multiple)
+                // ServerHello format: just 2 bytes for a single version (no length prefix)
 
                 let mut versions = Vec::new();
-                for i in (0..versions_length).step_by(2) {
-                    let version = u16::from_be_bytes([extension_data[1 + i], extension_data[1 + i + 1]]);
+
+                if extension_data.len() == 2 {
+                    // ServerHello format: single version (2 bytes)
+                    let version = u16::from_be_bytes([extension_data[0], extension_data[1]]);
                     versions.push(version);
+                } else {
+                    // ClientHello format: length prefix + versions
+                    let versions_length = extension_data[0] as usize;
+                    if !versions_length.is_multiple_of(2) {
+                        return Err(TlsError::InvalidExtensionData(
+                            "SupportedVersions length must be even".to_string(),
+                        ));
+                    }
+
+                    if extension_data.len() < 1 + versions_length {
+                        return Err(TlsError::InvalidExtensionData(
+                            "SupportedVersions data incomplete".to_string(),
+                        ));
+                    }
+
+                    for i in (0..versions_length).step_by(2) {
+                        let version =
+                            u16::from_be_bytes([extension_data[1 + i], extension_data[1 + i + 1]]);
+                        versions.push(version);
+                    }
                 }
 
                 Extension::SupportedVersions(versions)
@@ -405,27 +591,50 @@ impl Extension {
                     ));
                 }
 
-                let entries_length = u16::from_be_bytes([extension_data[0], extension_data[1]]) as usize;
-                if extension_data.len() < 2 + entries_length {
-                    return Err(TlsError::InvalidExtensionData(
-                        "KeyShare entries data incomplete".to_string(),
-                    ));
-                }
+                // Check if this is ClientHello format (with length prefix) or ServerHello format (single entry)
+                // ClientHello: entries_length (2 bytes) + entries
+                // ServerHello: single KeyShareEntry (no length prefix)
 
+                // Try to determine format by checking if first 2 bytes are a valid length
+                let potential_length =
+                    u16::from_be_bytes([extension_data[0], extension_data[1]]) as usize;
+
+                // If potential_length + 2 equals extension_data.len(), it's likely ClientHello format
+                // Otherwise, it's ServerHello format (single entry)
                 let mut entries = Vec::new();
-                let mut offset = 2;
-                let end = 2 + entries_length;
 
-                while offset < end {
-                    let (entry, consumed) = KeyShareEntry::from_bytes(&extension_data[offset..])?;
+                if extension_data.len() >= 2 + potential_length
+                    && potential_length > 0
+                    && 2 + potential_length == extension_data.len()
+                {
+                    // ClientHello format: has length prefix
+                    let mut offset = 2;
+                    let end = 2 + potential_length;
+
+                    while offset < end {
+                        let (entry, consumed) =
+                            KeyShareEntry::from_bytes(&extension_data[offset..])?;
+                        entries.push(entry);
+                        offset += consumed;
+                    }
+
+                    if offset != end {
+                        return Err(TlsError::InvalidExtensionData(
+                            "KeyShare entries length mismatch".to_string(),
+                        ));
+                    }
+                } else {
+                    // ServerHello format: single KeyShareEntry without length prefix
+                    let (entry, consumed) = KeyShareEntry::from_bytes(extension_data)?;
                     entries.push(entry);
-                    offset += consumed;
-                }
 
-                if offset != end {
-                    return Err(TlsError::InvalidExtensionData(
-                        "KeyShare entries length mismatch".to_string(),
-                    ));
+                    if consumed != extension_data.len() {
+                        return Err(TlsError::InvalidExtensionData(format!(
+                            "KeyShare entry size mismatch: consumed {} vs expected {}",
+                            consumed,
+                            extension_data.len()
+                        )));
+                    }
                 }
 
                 Extension::KeyShare(entries)

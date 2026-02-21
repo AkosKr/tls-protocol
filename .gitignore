@@ -29,3 +29,6 @@ target
 demo_cert.pem
 demo_cert.der
 demo_key.pem
+
+### Real TLS server responses (HTML Files) ###
+*.html
